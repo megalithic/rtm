@@ -717,7 +717,12 @@ impl Frame<'_> {
                 let end = lines.len() - scroll;
                 let start = end.saturating_sub(height);
                 // Anchored to the bottom: the newest output sits just above the card's edge.
-                let top = content.bottom() - (end - start) as u16;
+                // The Inbox is a list read from the top, oldest first.
+                let top = if row.kind == Kind::Inbox {
+                    content.y
+                } else {
+                    content.bottom() - (end - start) as u16
+                };
                 for (offset, line) in lines[start..end].iter().enumerate() {
                     let line = Line::from(
                         line.spans
