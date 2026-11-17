@@ -60,6 +60,9 @@ pub struct Metadata {
     pub worktree: Option<String>,
     pub pr: Option<Pr>,
     pub agent_count: usize,
+    /// Relevant sub-rows left out after the first few; shown as "+N more".
+    #[serde(default)]
+    pub hidden: usize,
     pub apps: Vec<Endpoint>,
     pub errors: Vec<String>,
 }
@@ -108,6 +111,10 @@ pub struct Inputs<'a> {
     pub seen: &'a Seen,
     pub now: u64,
 }
+
+/// An Ultimate instance lists busy, asking or failing conversations and those with recent input.
+const RECENT_INPUT_MS: u64 = 2 * 3_600_000;
+const MAX_CONVERSATIONS: usize = 5;
 
 fn seen(values: &Seen, key: &str) -> u64 {
     values.get(key).copied().unwrap_or_default()
@@ -337,14 +344,16 @@ pub fn build(inputs: &Inputs<'_>) -> Model {
                 let relevant = conversation.busy
                     || row.attention
                     || (!conversation.concluded.unwrap_or(false)
-                        && conversation
-                            .input_at
-                            .is_some_and(|time| time >= inputs.now.saturating_sub(86_400_000)));
+                        && conversation.input_at.is_some_and(|time| {
+                            time >= inputs.now.saturating_sub(RECENT_INPUT_MS)
+                        }));
                 relevant.then_some(row)
             })
             .collect();
         all.sort_by(child_order);
         let agent_count = all.len();
+        let hidden = agent_count.saturating_sub(MAX_CONVERSATIONS);
+        all.truncate(MAX_CONVERSATIONS);
         let conversation = all
             .first()
             .and_then(|row| match row.jump {
@@ -392,6 +401,7 @@ pub fn build(inputs: &Inputs<'_>) -> Model {
                 origin: Some(instance.url()),
                 hub: instance.hub.clone(),
                 agent_count,
+                hidden,
                 errors: instance.errors.clone(),
                 ..Metadata::default()
             },

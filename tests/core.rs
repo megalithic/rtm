@@ -317,3 +317,53 @@ fn seen_round_trip_merges_writers_and_rejects_corruption() {
     assert!(Store::open(&path).is_err());
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn ultimate_subrows_keep_recent_two_hours_and_at_most_five() {
+    let mut fixture = Fixture::load();
+    let now = fixture.now;
+    let base = fixture.ultimates[0].conversations[0].clone();
+    let extra = |id, busy, input_at| rtm::ultimate::Conversation {
+        id,
+        title: Some(format!("extra {id}")),
+        busy,
+        input_at,
+        ..base.clone()
+    };
+    // Three hours old and idle: no longer a sub-row.
+    fixture.ultimates[0]
+        .conversations
+        .push(extra(40, false, Some(now - 3 * 3_600_000)));
+    let row = fixture.model().groups[0].rows[0].clone();
+    assert_eq!(row.metadata.agent_count, 4);
+    assert!(!row.children.iter().any(|child| child.name == "extra 40"));
+    for id in 50..60 {
+        fixture.ultimates[0]
+            .conversations
+            .push(extra(id, true, Some(now - 1000)));
+    }
+    let row = fixture.model().groups[0].rows[0].clone();
+    assert_eq!(row.children.len(), 5);
+    assert_eq!(row.metadata.agent_count, 14);
+    assert_eq!(row.metadata.hidden, 9);
+    assert_eq!(row.children[0].name, "migration"); // Attention survives the cut.
+}
+
+#[test]
+fn dead_phoenix_apps_are_hidden() {
+    let mut fixture = Fixture::load();
+    fixture.registry.apps[1].dead = true;
+    let model = fixture.model();
+    let row = model.groups[1]
+        .rows
+        .iter()
+        .find(|row| row.name == "atlas-search")
+        .unwrap();
+    // The worktree's own app is dead; the parent checkout's app must not stand in.
+    assert!(row.metadata.apps.is_empty());
+    let dead: Registry = serde_json::from_value(
+        json!({"apps":[{"port":4000,"origin":"http://a","root":"/r","dead":true}]}),
+    )
+    .unwrap();
+    assert!(rtm::registry::apps_for(&dead, &["/r/x"]).is_empty());
+}

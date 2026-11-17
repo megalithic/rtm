@@ -17,6 +17,9 @@ pub struct App {
     pub port: u16,
     pub origin: Option<String>,
     pub root: Option<String>,
+    /// The registry keeps apps whose server has stopped; they are never shown.
+    #[serde(default)]
+    pub dead: bool,
 }
 
 pub fn path(root: &Path) -> PathBuf {
@@ -41,6 +44,7 @@ pub fn refresh(root: &Path) -> Result<Registry> {
 }
 
 /// An app can cover several nested worktrees; the deepest app root wins per cwd.
+/// A dead deepest app hides the cwd's app rather than falling back to a parent's.
 pub fn apps_for<'a>(registry: &'a Registry, cwds: &[&str]) -> Vec<&'a App> {
     let mut apps = Vec::new();
     for cwd in cwds {
@@ -54,6 +58,7 @@ pub fn apps_for<'a>(registry: &'a Registry, cwds: &[&str]) -> Vec<&'a App> {
             })
             .max_by_key(|app| app.root.as_ref().map_or(0, String::len));
         if let Some(app) = selected
+            && !app.dead
             && !apps.iter().any(|existing: &&App| existing.port == app.port)
         {
             apps.push(app);
