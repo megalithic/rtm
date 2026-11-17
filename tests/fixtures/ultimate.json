@@ -1,0 +1,19 @@
+[
+  {
+    "pid":1004,"port":4700,"project":"/Users/demo/code/atlas","hub":"secondary",
+    "status":{"busy":2,"questions":{"count":1,"first":{"text":"Approve deployment?","conversation":2}},"failures":[]},
+    "conversations":[
+      {"id":1,"title":"Coordinator","cwd":"/Users/demo/code/atlas","busy":false,"inputAt":1794922000000},
+      {"id":2,"title":"Database indexes","label":"migration","cwd":"/Users/demo/code/atlas/.worktrees/db","busy":false,"inputAt":1794921000000,"parent":{"conversationId":1,"at":100}},
+      {"id":3,"title":"Recent review","cwd":"/Users/demo/code/atlas","busy":false,"inputAt":1794924000000},
+      {"id":4,"title":"Old archived topic","cwd":"/Users/demo/code/atlas","busy":false,"inputAt":1794700000000},
+      {"id":5,"title":"Concluded topic","cwd":"/Users/demo/code/atlas","busy":false,"inputAt":1794924500000,"concluded":true},
+      {"id":6,"title":"Background worker","cwd":"/Users/demo/code/atlas","busy":true}
+    ]
+  },
+  {
+    "pid":1010,"port":4701,"project":"/Users/demo/code/atlas/.worktrees/search",
+    "status":{"busy":1,"questions":{"count":0},"failures":[]},
+    "conversations":[{"id":1,"cwd":"/Users/demo/code/atlas/.worktrees/search","busy":true,"inputAt":1794924900000}]
+  }
+]

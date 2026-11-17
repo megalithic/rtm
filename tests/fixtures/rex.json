@@ -1,0 +1,66 @@
+[
+  {
+    "id": "session:3", "label": "atlas-main",
+    "blocks": [
+      {
+        "id": "block:1", "label": "shell",
+        "process": {
+          "ancestors": [{"argv0":"-fish","cwd":"/Users/demo/code/atlas","invoked_path":"/usr/bin/fish","name":"fish","path":"/usr/bin/fish","pid":1000,"user":"demo","user_id":1001},{"name":"login","path":"/usr/bin/login","pid":1002,"user":"demo","user_id":1003}],
+          "child":{"name":"login","path":"/usr/bin/login","pid":1002,"user":"demo","user_id":1003},
+          "foreground":{"argv0":"node","cwd":"/Users/demo/code/atlas","invoked_path":"/Users/demo/bin/node","name":"node","path":"/Users/demo/bin/node","pid":1004,"script":"/Users/demo/bin/ultimate","user":"demo","user_id":1001},
+          "home":"/Users/demo"
+        },
+        "status":{"records":[{"app":"ultimate","effective_app":"ultimate","msg":"Waiting for review","owner":{"name":"node","pid":1004},"state":"blocked","updated_at":"2026-11-16T16:45:54.918742-05:00"}]}
+      },
+      {
+        "id": "block:2", "label": "shell",
+        "process": {
+          "ancestors":[{"argv0":"-fish","cwd":"/Users/demo/code/atlas","invoked_path":"/usr/bin/fish","name":"fish","path":"/usr/bin/fish","pid":1005,"user":"demo","user_id":1001},{"name":"login","path":"/usr/bin/login","pid":1006,"user":"demo","user_id":1003}],
+          "child":{"name":"login","path":"/usr/bin/login","pid":1006,"user":"demo","user_id":1003},
+          "foreground":{"argv0":"pi","cwd":"/Users/demo/code/atlas","invoked_path":"/Users/demo/bin/node","name":"node","path":"/Users/demo/bin/node","pid":1007,"user":"demo","user_id":1001},
+          "home":"/Users/demo"
+        },
+        "status":{"records":[{"app":"pi","effective_app":"pi","msg":"Waiting for review","owner":{"name":"node","pid":1007},"state":"done","updated_at":"2026-11-16T15:17:45.882285-05:00"}]}
+      }
+    ],
+    "view": {
+      "active_window_id":"window:4","label":"atlas-main","revision":107,"session_id":"session:3",
+      "windows":[
+        {"focused_block_id":"block:1","label":"atlas-main","layers":[{"blocks":[{"block_id":"block:1","creator_name":"com.superlogical.terminal","flavor":"com.superlogical.terminal.shell","host_id":"host-demo","label":"shell"}],"bounds":[0,0,1,1],"kind":"tiled","layer_id":"layer:5","layout":{"block_id":"block:1","rect":[0,0,1,1]}}],"window_id":"window:6"},
+        {"focused_block_id":"block:2","label":"atlas-main","layers":[{"blocks":[{"block_id":"block:2","creator_name":"com.superlogical.terminal","flavor":"com.superlogical.terminal.shell","host_id":"host-demo","label":"shell"}],"bounds":[0,0,1,1],"kind":"tiled","layer_id":"layer:7","layout":{"block_id":"block:2","rect":[0,0,1,1]}}],"window_id":"window:4"}
+      ]
+    }
+  },
+  {
+    "id":"session:10","label":"atlas-search",
+    "blocks":[
+      {
+        "id":"block:8","label":"shell",
+        "process":{
+          "ancestors":[{"argv0":"-fish","cwd":"/Users/demo/code/atlas/.worktrees/search","invoked_path":"/usr/bin/fish","name":"fish","path":"/usr/bin/fish","pid":1008,"user":"demo","user_id":1001},{"name":"login","path":"/usr/bin/login","pid":1009,"user":"demo","user_id":1003}],
+          "child":{"name":"login","path":"/usr/bin/login","pid":1009,"user":"demo","user_id":1003},
+          "foreground":{"argv0":"node","cwd":"/Users/demo/code/atlas/.worktrees/search","name":"node","path":"/Users/demo/bin/node","pid":1010,"script":"/Users/demo/bin/ultimate","user":"demo","user_id":1001},
+          "home":"/Users/demo"
+        },
+        "status":{"records":[{"app":"ultimate","effective_app":"ultimate","msg":"Review build","owner":{"name":"node","pid":1010},"state":"working","updated_at":"2026-11-17T09:13:48.977219-05:00"}]}
+      },
+      {
+        "id":"block:9","label":"shell",
+        "process":{
+          "ancestors":[{"argv0":"-fish","cwd":"/Users/demo/code/atlas/.worktrees/search","invoked_path":"/usr/bin/fish","name":"fish","path":"/usr/bin/fish","pid":1011,"user":"demo","user_id":1001},{"name":"login","path":"/usr/bin/login","pid":1012,"user":"demo","user_id":1003}],
+          "child":{"name":"login","path":"/usr/bin/login","pid":1012,"user":"demo","user_id":1003},
+          "foreground":{"argv0":"pi","cwd":"/Users/demo/code/atlas/.worktrees/search","invoked_path":"/Users/demo/bin/node","name":"node","path":"/Users/demo/bin/node","pid":1013,"user":"demo","user_id":1001},
+          "home":"/Users/demo"
+        },
+        "status":{"records":[{"app":"pi","effective_app":"pi","owner":{"name":"node","pid":1013},"state":"idle","updated_at":"2026-11-16T12:02:42.519953-05:00"}]}
+      }
+    ],
+    "view":{
+      "active_window_id":"window:11","label":"atlas-search","revision":558,"session_id":"session:10",
+      "windows":[
+        {"focused_block_id":"block:8","label":"atlas-search","layers":[{"blocks":[{"block_id":"block:8","creator_name":"com.superlogical.terminal","flavor":"com.superlogical.terminal.shell","host_id":"host-demo","label":"shell"}],"bounds":[0,0,1,1],"kind":"tiled","layer_id":"layer:12","layout":{"block_id":"block:8","rect":[0,0,1,1]}}],"window_id":"window:13"},
+        {"focused_block_id":"block:9","label":"atlas-search","layers":[{"blocks":[{"block_id":"block:9","creator_name":"com.superlogical.terminal","flavor":"com.superlogical.terminal.shell","host_id":"host-demo","label":"shell"}],"bounds":[0,0,1,1],"kind":"tiled","layer_id":"layer:14","layout":{"block_id":"block:9","rect":[0,0,1,1]}}],"window_id":"window:11"}
+      ]
+    }
+  }
+]

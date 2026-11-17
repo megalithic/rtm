@@ -1,0 +1,319 @@
+use rtm::{
+    Timestamp,
+    git::{Colour, PullRequest, PullRequests, Worktrees},
+    model::{self, Inputs, JumpTarget, Kind, Model, PreviewSource},
+    registry::Registry,
+    rex::{Session, Status},
+    search,
+    seen::{Seen, Store},
+    ultimate::Instance,
+};
+use serde::Deserialize;
+use serde_json::json;
+
+#[derive(Deserialize)]
+struct Fixture {
+    now: u64,
+    registry: Registry,
+    worktrees: Worktrees,
+    prs: PullRequests,
+    seen: Seen,
+    #[serde(skip)]
+    rex: Vec<Session>,
+    #[serde(skip)]
+    ultimates: Vec<Instance>,
+}
+
+impl Fixture {
+    fn load() -> Self {
+        let mut fixture: Self =
+            serde_json::from_str(include_str!("fixtures/enrichment.json")).unwrap();
+        fixture.rex = serde_json::from_str(include_str!("fixtures/rex.json")).unwrap();
+        fixture.ultimates = serde_json::from_str(include_str!("fixtures/ultimate.json")).unwrap();
+        fixture
+    }
+
+    fn model(&self) -> Model {
+        model::build(&Inputs {
+            rex: &self.rex,
+            ultimates: &self.ultimates,
+            registry: &self.registry,
+            worktrees: &self.worktrees,
+            prs: &self.prs,
+            seen: &self.seen,
+            now: self.now,
+        })
+    }
+}
+
+#[test]
+fn live_schema_empty_lua_lists_and_conversation_parents() {
+    let sessions = rtm::rex::decode(include_bytes!("fixtures/rex-empty.json")).unwrap();
+    assert!(sessions[0].blocks[0].records().is_empty());
+    assert!(rtm::rex::decode(b"{}").unwrap().is_empty());
+    assert!(rtm::rex::decode(br#"{"unexpected":1}"#).is_err());
+    let fixture = Fixture::load();
+    let parent = fixture.ultimates[0].conversations[1]
+        .parent
+        .as_ref()
+        .unwrap();
+    assert_eq!(parent.conversation_id, 1);
+    assert_eq!(parent.at, 100);
+}
+
+#[test]
+fn groups_folds_hosts_retains_mixed_sessions_and_locations() {
+    let mut fixture = Fixture::load();
+    let model = fixture.model();
+    assert_eq!(
+        model
+            .groups
+            .iter()
+            .map(|group| group.kind)
+            .collect::<Vec<_>>(),
+        [Kind::Ultimate, Kind::Rex]
+    );
+    assert_eq!(model.groups[0].rows.len(), 2);
+    assert_eq!(model.groups[1].rows.len(), 2);
+    let ultimate = &model.groups[0].rows[0];
+    assert_eq!(ultimate.name, "atlas");
+    assert!(
+        matches!(&ultimate.jump, JumpTarget::Ultimate { rex: Some(location), .. }
+        if location.session == "session:3" && location.window.as_deref() == Some("window:6") && location.block == "block:1")
+    );
+    let rex = &model.groups[1].rows[0];
+    assert_eq!(rex.name, "atlas-main");
+    assert_eq!(rex.state, "done"); // Folded blocked host must not leak into the Rex row.
+    assert_eq!(rex.metadata.agent_count, 1);
+    assert!(rex.children.is_empty());
+    assert!(matches!(&rex.preview, Some(PreviewSource::Rex { block }) if block == "block:2"));
+    assert!(
+        matches!(&rex.jump, JumpTarget::Rex { window: Some(window), .. } if window == "window:4")
+    );
+    fixture.rex[0].blocks.truncate(1);
+    assert_eq!(fixture.model().groups[1].rows.len(), 1); // Ultimate-only session disappears.
+    fixture.ultimates[0].pid = 9999;
+    assert_eq!(fixture.model().groups[1].rows.len(), 2); // App name alone is not enough to fold.
+}
+
+#[test]
+fn ultimate_children_attention_recency_seen_and_root_name() {
+    let fixture = Fixture::load();
+    let model = fixture.model();
+    let row = &model.groups[0].rows[0];
+    assert!(row.attention);
+    assert_eq!(row.state, "blocked");
+    assert_eq!(row.metadata.agent_count, 4);
+    assert_eq!(
+        row.children
+            .iter()
+            .map(|child| child.name.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "migration",
+            "Recent review",
+            "@ultimate",
+            "Background worker"
+        ]
+    );
+    assert!(row.children[0].attention);
+    assert_eq!(row.children[0].last_viewed, 1794923000000);
+    assert_eq!(row.last_viewed, 1794924500000); // Includes concluded conversations for last-viewed.
+    assert!(model.groups[0].rows[1].children.is_empty());
+    assert!(row.last_activity >= 1794924500000);
+    let mut failed = Fixture::load();
+    failed.ultimates[0].status.as_mut().unwrap().questions.count = 0;
+    failed.ultimates[0].status.as_mut().unwrap().failures = vec![json!({"conversation":3})];
+    assert!(
+        failed.model().groups[0]
+            .rows
+            .iter()
+            .find(|row| row.name == "atlas")
+            .unwrap()
+            .attention
+    );
+}
+
+#[test]
+fn rex_unread_done_blocked_children_and_subrow_order() {
+    let mut fixture = Fixture::load();
+    let done = fixture.rex[0].blocks[1].records()[0].activity();
+    assert_eq!(done, 1794860265882); // Offset + fractional RFC3339 is epoch milliseconds.
+    fixture.seen.insert("rex:session:3".into(), done);
+    let model = fixture.model();
+    assert!(
+        !model.groups[1]
+            .rows
+            .iter()
+            .find(|row| row.name == "atlas-main")
+            .unwrap()
+            .attention
+    );
+    let mut second = fixture.rex[0].blocks[1].clone();
+    second.id = "block:extra".into();
+    let record = &mut second.status.as_mut().unwrap().records[0];
+    record.state = "blocked".into();
+    record.msg = Some("Need credentials".into());
+    record.updated_at = Some(Timestamp::Millis(1));
+    fixture.rex[0].blocks.push(second);
+    let model = fixture.model();
+    let row = model.groups[1]
+        .rows
+        .iter()
+        .find(|row| row.name == "atlas-main")
+        .unwrap();
+    assert!(row.attention);
+    assert_eq!(row.children.len(), 2);
+    assert_eq!(row.children[0].name, "Need credentials");
+    assert!(row.children[0].attention); // Blocked remains attention even if already seen.
+    assert!(!row.children[1].attention);
+    fixture.seen.insert("rex:session:3".into(), done - 1);
+    assert!(fixture.model().groups[1].rows[0].children[1].attention);
+}
+
+#[test]
+fn rows_sort_attention_then_viewed_then_activity_then_name() {
+    let mut fixture = Fixture::load();
+    fixture.ultimates.clear();
+    fixture.rex[0].blocks[0].status = Some(Status::default());
+    fixture.rex[1].blocks[0].status = Some(Status::default());
+    // Unread done precedes a more recently viewed idle row.
+    fixture.seen.insert("rex:session:10".into(), fixture.now);
+    assert_eq!(fixture.model().groups[1].rows[0].name, "atlas-main");
+    fixture.seen.insert("rex:session:3".into(), fixture.now + 1);
+    assert_eq!(fixture.model().groups[1].rows[0].name, "atlas-main");
+    fixture.seen.insert("rex:session:3".into(), fixture.now);
+    assert_eq!(fixture.model().groups[1].rows[0].name, "atlas-main"); // Newer activity breaks equal viewed.
+    fixture.rex[1].blocks[1].status = fixture.rex[0].blocks[1].status.clone();
+    fixture.rex[1].label = "aaa".into();
+    assert_eq!(fixture.model().groups[1].rows[0].name, "aaa");
+}
+
+#[test]
+fn worktree_branch_pr_and_deepest_app_match() {
+    let fixture = Fixture::load();
+    let model = fixture.model();
+    let row = model.groups[1]
+        .rows
+        .iter()
+        .find(|row| row.name == "atlas-search")
+        .unwrap();
+    assert_eq!(row.metadata.branch.as_deref(), Some("search"));
+    assert_eq!(
+        row.metadata.worktree.as_deref(),
+        Some("/Users/demo/code/atlas/.worktrees/search")
+    );
+    let pr = row.metadata.pr.as_ref().unwrap();
+    assert_eq!(pr.number, 42);
+    assert_eq!(pr.colour, Colour::Green);
+    assert_eq!(row.metadata.apps.len(), 1);
+    assert_eq!(row.metadata.apps[0].port, 4001);
+    assert_eq!(
+        row.metadata.apps[0].origin.as_deref(),
+        Some("http://search.local")
+    );
+}
+
+#[test]
+fn search_tiers_child_hits_and_highlight_indices() {
+    let mut fixture = Fixture::load();
+    // One genuine name match must beat a newer, attention-bearing conversation title hit.
+    fixture.rex[1].label = "indexes".into();
+    fixture
+        .seen
+        .insert("ult:/Users/demo/code/atlas".into(), fixture.now);
+    let model = fixture.model();
+    let hits = search::search(&model, "indexes");
+    assert_eq!(hits.len(), 2);
+    assert_eq!(hits[0].tier, 1);
+    assert_eq!(hits[0].group, 1);
+    assert_eq!(hits[0].matches[0].indices, [0, 1, 2, 3, 4, 5, 6]);
+    assert_eq!(hits[1].tier, 2);
+    assert_eq!(hits[1].group, 0);
+    assert_eq!(hits[1].children.len(), 1);
+    let child = &model.groups[hits[1].group].rows[hits[1].row].children[hits[1].children[0].child];
+    assert_eq!(child.name, "migration");
+    let found = &hits[1].children[0].matches[0];
+    let matched: String = found
+        .indices
+        .iter()
+        .map(|index| found.text.chars().nth(*index as usize).unwrap())
+        .collect();
+    assert_eq!(matched.to_lowercase(), "indexes");
+    assert_eq!(search::search(&model, "").len(), 4);
+    assert!(search::search(&model, "qqqqqqqqqqqq").is_empty());
+    // A single agent has no sub-row but its status message is still tier 2 searchable.
+    assert!(
+        search::search(&model, "Waiting")
+            .iter()
+            .any(|hit| hit.group == 1 && hit.tier == 2)
+    );
+}
+
+#[test]
+fn search_within_tier_viewed_precedes_attention_then_score() {
+    let mut model = Fixture::load().model();
+    let rows = &mut model.groups[1].rows;
+    rows[0].name = "alpha".into();
+    rows[1].name = "alpha beta".into();
+    rows[0].last_viewed = 10;
+    rows[1].last_viewed = 20;
+    rows[0].attention = true;
+    rows[1].attention = false;
+    assert_eq!(search::search(&model, "alpha")[0].row, 1);
+    model.groups[1].rows[0].last_viewed = 20;
+    assert_eq!(search::search(&model, "alpha")[0].row, 0);
+    model.groups[1].rows[0].attention = false;
+    let hits = search::search(&model, "alpha");
+    assert!(hits[0].score >= hits[1].score);
+}
+
+#[test]
+fn pr_colours_cover_conflicts_drafts_and_all_failure_states() {
+    let fixture = Fixture::load();
+    let base = fixture.prs.values().next().unwrap()[0].clone();
+    assert_eq!(base.colour(), Colour::Green);
+    let mut pr = base.clone();
+    pr.is_draft = true;
+    assert_eq!(pr.colour(), Colour::Blue);
+    pr.mergeable = "CONFLICTING".into();
+    assert_eq!(pr.colour(), Colour::Red);
+    pr = base.clone();
+    pr.merge_state_status = "DIRTY".into();
+    assert_eq!(pr.colour(), Colour::Red);
+    for failure in [
+        "FAILURE",
+        "ERROR",
+        "CANCELLED",
+        "TIMED_OUT",
+        "ACTION_REQUIRED",
+        "STARTUP_FAILURE",
+    ] {
+        for field in ["state", "conclusion"] {
+            pr = base.clone();
+            pr.status_check_rollup = Some(vec![json!({field:failure})]);
+            assert_eq!(pr.colour(), Colour::Red, "{field}={failure}");
+        }
+    }
+    let pending: PullRequest = serde_json::from_value(json!({"number":1,"headRefName":"topic","mergeStateStatus":"BLOCKED","statusCheckRollup":null,"url":"https://example.test/pr/1"})).unwrap();
+    assert_eq!(pending.colour(), Colour::Blue);
+}
+
+#[test]
+fn seen_round_trip_merges_writers_and_rejects_corruption() {
+    let dir = std::env::temp_dir().join(format!("rtm-seen-test-{}", std::process::id()));
+    let path = dir.join("seen.json");
+    let mut first = Store::open(&path).unwrap();
+    let mut second = Store::open(&path).unwrap();
+    assert_eq!(first.get("missing"), 0);
+    first.mark_at("rex:session:3", 123).unwrap();
+    second.mark_at("ult:/demo#1", 456).unwrap();
+    let mut reopened = Store::open(&path).unwrap();
+    assert_eq!(reopened.get("rex:session:3"), 123);
+    assert_eq!(reopened.get("ult:/demo#1"), 456);
+    reopened.mark_at("rex:session:3", 100).unwrap();
+    assert_eq!(Store::open(&path).unwrap().get("rex:session:3"), 123);
+    std::fs::write(&path, b"broken").unwrap();
+    assert!(Store::open(&path).is_err());
+    std::fs::remove_dir_all(dir).unwrap();
+}

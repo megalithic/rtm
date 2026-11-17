@@ -1,0 +1,7 @@
+[
+  {
+    "id":"session:empty-status","label":"atlas-shell",
+    "blocks":[{"id":"block:shell","label":"shell","process":{"foreground":{"pid":2000,"name":"fish","argv0":"-fish","cwd":"/Users/demo/code/atlas"},"home":"/Users/demo"},"status":{"records":{}}}],
+    "view":{"active_window_id":"window:shell","windows":[{"window_id":"window:shell","layers":[{"blocks":[{"block_id":"block:shell"}]}]}]}
+  }
+]
