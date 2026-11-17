@@ -12,7 +12,7 @@ use std::{
     path::Path,
     process::{Command, Stdio},
     thread,
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 #[derive(Debug, Serialize)]
@@ -143,7 +143,10 @@ pub fn load(wait: bool) -> Result<Snapshot> {
         if let Ok(Some(report)) = cache::read::<Refresh>(&root.join("refresh.json")) {
             warnings.extend(report.errors);
         }
-        if let Err(error) = start_refresh(&root, &repos) {
+        // `rtm pick` loads every few seconds; the registry and PRs need not refresh as often.
+        if !cache::fresh(&root.join("refresh.json"), Duration::from_secs(10))
+            && let Err(error) = start_refresh(&root, &repos)
+        {
             warnings.push(format!("{error:#}"));
         }
     }

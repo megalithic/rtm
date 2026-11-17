@@ -390,3 +390,34 @@ fn keys_parse_including_ctrl_shift() {
     assert_eq!(event.modifiers, KeyModifiers::CONTROL | KeyModifiers::SHIFT);
     assert!(parse_key("hyper+x").is_none());
 }
+
+#[test]
+fn an_in_flight_preview_does_not_wake_the_loop() {
+    use rtm::pick::next_wake;
+    use std::time::{Duration, Instant};
+    let now = Instant::now();
+    let past = now - Duration::from_secs(1);
+    // Expired but blocked behind an in-flight request: sleep until input or the response.
+    assert_eq!(next_wake(Some(past), true, None, None), None);
+    assert_eq!(next_wake(Some(past), false, None, None), Some(past));
+    let frame = now + Duration::from_millis(16);
+    assert_eq!(next_wake(Some(past), true, Some(frame), None), Some(frame));
+    let spin = now + Duration::from_millis(100);
+    assert_eq!(next_wake(None, false, Some(frame), Some(spin)), Some(frame));
+    assert_eq!(next_wake(None, false, None, None), None);
+}
+
+#[test]
+fn a_stuck_capture_is_killed_after_its_limit() {
+    use std::time::{Duration, Instant};
+    let mut command = std::process::Command::new("sleep");
+    command.arg("5");
+    let start = Instant::now();
+    let error = rtm::pick::preview::output_within(command, Duration::from_millis(200)).unwrap_err();
+    assert!(start.elapsed() < Duration::from_secs(2));
+    assert!(error.to_string().contains("timed out"));
+    let mut command = std::process::Command::new("echo");
+    command.arg("hi");
+    let output = rtm::pick::preview::output_within(command, Duration::from_secs(2)).unwrap();
+    assert_eq!(output.stdout, b"hi\n");
+}

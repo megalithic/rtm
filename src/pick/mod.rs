@@ -484,16 +484,29 @@ impl Loop {
     }
 
     fn next_deadline(&self, now: Instant) -> Option<Instant> {
-        let mut next = self.due;
-        let mut add = |at: Instant| next = Some(next.map_or(at, |n: Instant| n.min(at)));
-        if self.effects.is_running() || self.view.animating(now) {
-            add(now + FRAME);
-        }
-        if self.view.has_spinner || matches!(self.app.mode, Mode::Create { busy: true, .. }) {
-            add(self.spun + SPIN);
-        }
-        next
+        next_wake(
+            self.due,
+            self.asked.is_some(),
+            (self.effects.is_running() || self.view.animating(now)).then_some(now + FRAME),
+            (self.view.has_spinner || matches!(self.app.mode, Mode::Create { busy: true, .. }))
+                .then_some(self.spun + SPIN),
+        )
     }
+}
+
+/// When the loop must wake without input. A due preview only counts while no request is in
+/// flight: until its response arrives (which wakes the loop itself) the deadline cannot be
+/// acted on, and an expired one would otherwise mean zero-timeout waits and endless redraws.
+pub fn next_wake(
+    preview_due: Option<Instant>,
+    in_flight: bool,
+    frame: Option<Instant>,
+    spin: Option<Instant>,
+) -> Option<Instant> {
+    [preview_due.filter(|_| !in_flight), frame, spin]
+        .into_iter()
+        .flatten()
+        .min()
 }
 
 impl actions::System {

@@ -6,8 +6,9 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
     process::Command,
+    sync::Mutex,
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -105,6 +106,26 @@ pub fn worktree(cwd: &str) -> Result<Worktree> {
     Ok(Worktree { path, repo, branch })
 }
 
+/// How long a cwd's worktree lookup is reused. Each lookup is three git processes, and a
+/// long-running `rtm pick` refreshes every few seconds; branches rarely change faster.
+const REMEMBER: Duration = Duration::from_secs(30);
+
+type Lookup = std::result::Result<Worktree, String>;
+
+fn remembered(cwd: &str) -> Result<Worktree> {
+    static SEEN: Mutex<BTreeMap<String, (Instant, Lookup)>> = Mutex::new(BTreeMap::new());
+    if let Some((at, lookup)) = SEEN.lock().ok().and_then(|seen| seen.get(cwd).cloned())
+        && at.elapsed() < REMEMBER
+    {
+        return lookup.map_err(anyhow::Error::msg);
+    }
+    let lookup = worktree(cwd).map_err(|error| format!("{error:#}"));
+    if let Ok(mut seen) = SEEN.lock() {
+        seen.insert(cwd.to_owned(), (Instant::now(), lookup.clone()));
+    }
+    lookup.map_err(anyhow::Error::msg)
+}
+
 pub fn discover(sessions: &[rex::Session]) -> (Worktrees, Vec<String>) {
     let cwds: BTreeSet<_> = sessions
         .iter()
@@ -114,7 +135,7 @@ pub fn discover(sessions: &[rex::Session]) -> (Worktrees, Vec<String>) {
     thread::scope(|scope| {
         let workers: Vec<_> = cwds
             .into_iter()
-            .map(|cwd| (cwd, scope.spawn(move || worktree(cwd))))
+            .map(|cwd| (cwd, scope.spawn(move || remembered(cwd))))
             .collect();
         let mut trees = Worktrees::new();
         let mut errors = Vec::new();

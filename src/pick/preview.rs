@@ -8,7 +8,8 @@ use ratatui::{
 };
 use serde_json::Value;
 use std::{
-    process::{Command, Stdio},
+    io::Read,
+    process::{Command, Output, Stdio},
     sync::mpsc::{Receiver, Sender, channel},
     thread,
     time::{Duration, Instant},
@@ -62,20 +63,18 @@ fn load(request: &Request) -> anyhow::Result<Text<'static>> {
     match &request.source {
         PreviewSource::Rex { block } => {
             let session = request.session.as_deref().unwrap_or_default();
-            let output = Command::new(super::actions::rex_bin())
-                .args([
-                    "--autostart=false",
-                    "capture",
-                    "-s",
-                    session,
-                    "-b",
-                    block,
-                    "--format",
-                    "vt",
-                ])
-                .stdin(Stdio::null())
-                .stderr(Stdio::piped())
-                .output()?;
+            let mut command = Command::new(super::actions::rex_bin());
+            command.args([
+                "--autostart=false",
+                "capture",
+                "-s",
+                session,
+                "-b",
+                block,
+                "--format",
+                "vt",
+            ]);
+            let output = output_within(command, CAPTURE_LIMIT)?;
             if !output.status.success() {
                 anyhow::bail!("{}", String::from_utf8_lossy(&output.stderr).trim());
             }
@@ -85,6 +84,48 @@ fn load(request: &Request) -> anyhow::Result<Text<'static>> {
             Ok(conversation_text(&ultimate::entries(url, *conversation)?))
         }
     }
+}
+
+/// A stuck `rex capture` must not hold the preview worker: later requests queue behind it.
+const CAPTURE_LIMIT: Duration = Duration::from_secs(2);
+
+/// Runs `command`, killing it once `limit` has passed.
+pub fn output_within(mut command: Command, limit: Duration) -> anyhow::Result<Output> {
+    let mut child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    // Drain both pipes on threads so a large capture cannot block the child on a full pipe.
+    let mut stdout = child.stdout.take().expect("piped stdout");
+    let mut stderr = child.stderr.take().expect("piped stderr");
+    let out = thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = stdout.read_to_end(&mut bytes);
+        bytes
+    });
+    let err = thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = stderr.read_to_end(&mut bytes);
+        bytes
+    });
+    let deadline = Instant::now() + limit;
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            anyhow::bail!("timed out after {} s", limit.as_secs_f32());
+        }
+        thread::sleep(Duration::from_millis(5));
+    };
+    Ok(Output {
+        status,
+        stdout: out.join().unwrap_or_default(),
+        stderr: err.join().unwrap_or_default(),
+    })
 }
 
 /// The bottom of a terminal capture, without its trailing blank rows.
