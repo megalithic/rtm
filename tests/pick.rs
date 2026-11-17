@@ -421,3 +421,72 @@ fn a_stuck_capture_is_killed_after_its_limit() {
     let output = rtm::pick::preview::output_within(command, Duration::from_secs(2)).unwrap();
     assert_eq!(output.stdout, b"hi\n");
 }
+
+#[test]
+fn tiny_buffers_render_without_panicking() {
+    use ratatui::{buffer::Buffer, layout::Rect};
+    use rtm::pick::{draw_kill, ui};
+    use std::time::Instant;
+    for (width, height) in [
+        (1, 1),
+        (5, 2),
+        (20, 2),
+        (76, 7),
+        (4, 1),
+        (30, 3),
+        (31, 8),
+        (100, 9),
+        (200, 60),
+    ] {
+        let area = Rect::new(0, 0, width, height);
+        let mut buf = Buffer::empty(area);
+        draw_kill(
+            &mut buf,
+            area,
+            "provider_portal-sm-admin-auto-enroll-provider",
+        );
+        // Offset areas too: Rex draws the layer at its own origin.
+        let shifted = Rect::new(3, 2, width, height);
+        let mut offset = Buffer::empty(shifted);
+        draw_kill(&mut offset, shifted, "x");
+        let mut app = App::new(model());
+        for mode in [
+            "",
+            "ctrl+n ctrl+t",
+            "ctrl+n ctrl+n ctrl+n ctrl+n ctrl+n ctrl+n ctrl+n ctrl+n ctrl+k",
+        ] {
+            for name in mode.split_whitespace() {
+                app.key(key(name));
+            }
+            let mut view = ui::View::default();
+            let mut buf = Buffer::empty(area);
+            ui::draw(&mut buf, &app, &mut view, Instant::now(), 1_794_925_000_000);
+            app.key(key("esc"));
+        }
+    }
+    let area = Rect::new(0, 0, 76, 7);
+    let mut buf = Buffer::empty(area);
+    draw_kill(&mut buf, area, "box");
+    let text: String = (0..7)
+        .map(|y| {
+            (0..76)
+                .map(|x| buf[(x, y)].symbol().to_owned())
+                .collect::<String>()
+                + "\n"
+        })
+        .collect();
+    assert!(
+        text.contains("kill box?") && text.contains("any key cancel"),
+        "{text}"
+    );
+    let area = Rect::new(0, 0, 40, 2);
+    let mut buf = Buffer::empty(area);
+    draw_kill(&mut buf, area, "box");
+    let row = |y| {
+        (0..40)
+            .map(|x| buf[(x, y)].symbol().to_owned())
+            .collect::<String>()
+    };
+    assert!(row(0).contains("kill box?"));
+    assert!(row(1).contains("y kill"));
+}

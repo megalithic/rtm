@@ -723,7 +723,10 @@ pub fn kill_prompt(session: &str, keys: Vec<KeyEvent>) -> Result<()> {
     }
 }
 
-fn draw_kill(buf: &mut Buffer, area: Rect, name: &str) {
+/// The question, centred, with its hint two rows below; tighter when short, alone when
+/// shorter still. Everything is clipped to `area`.
+pub fn draw_kill(buf: &mut Buffer, area: Rect, name: &str) {
+    let area = area.intersection(buf.area);
     for y in area.top()..area.bottom() {
         for x in area.left()..area.right() {
             let cell = &mut buf[(x, y)];
@@ -731,7 +734,14 @@ fn draw_kill(buf: &mut Buffer, area: Rect, name: &str) {
             cell.set_bg(theme::PAGE);
         }
     }
-    let y = area.y + area.height.saturating_sub(2) / 2;
+    let gap = match area.height {
+        0 => return,
+        1 => None,
+        2 => Some(1),
+        _ => Some(2),
+    };
+    let block = gap.map_or(1, |gap| gap + 1);
+    let y = area.y + (area.height - block) / 2;
     let question = Line::from(vec![
         Span::styled("kill ", Style::new().fg(theme::RED)),
         Span::styled(name.to_owned(), theme::text().add_modifier(Modifier::BOLD)),
@@ -743,9 +753,15 @@ fn draw_kill(buf: &mut Buffer, area: Rect, name: &str) {
         Span::styled("any key", theme::muted()),
         Span::styled(" cancel", theme::faint()),
     ]);
-    for (offset, line) in [question, hint].iter().enumerate() {
-        let width = (line.width() as u16).min(area.width.saturating_sub(4));
+    let margin = if area.width > 8 { 4 } else { 0 };
+    let lines = [(0, Some(question)), (gap.unwrap_or(0), gap.map(|_| hint))];
+    for (offset, line) in lines {
+        let Some(line) = line else { continue };
+        let width = (line.width() as u16).min(area.width.saturating_sub(margin));
+        if width == 0 {
+            continue;
+        }
         let x = area.x + area.width.saturating_sub(width) / 2;
-        buf.set_line(x, y + offset as u16 * 2, line, width);
+        buf.set_line(x, y + offset, &line, width);
     }
 }
