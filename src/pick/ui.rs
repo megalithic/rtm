@@ -415,7 +415,10 @@ impl Frame<'_> {
                 .flat_map(|row| std::iter::once(row).chain(&row.children))
         };
         let blocked = rows()
-            .filter(|row| row.state == "blocked" && row.children.is_empty())
+            // The Inbox repeats its conversations' questions: count each question once.
+            .filter(|row| {
+                row.state == "blocked" && row.children.is_empty() && row.kind != Kind::Inbox
+            })
             .count();
         let working = rows()
             .filter(|row| row.state == "working" && row.children.is_empty())
@@ -560,6 +563,18 @@ impl Frame<'_> {
                         theme::muted()
                     };
                     left.extend(highlight(&row.name, &item.hits, base));
+                    if row.kind == Kind::Inbox {
+                        // The count is the row's point; amber only when a question waits.
+                        let count = if row.attention {
+                            Style::new().fg(YELLOW)
+                        } else {
+                            theme::faint()
+                        };
+                        left.push(Span::styled(
+                            format!("  {}", row.metadata.agent_count),
+                            count,
+                        ));
+                    }
                 } else {
                     left.extend(name_spans(row, &item.hits, selected));
                 }
@@ -690,7 +705,8 @@ impl Frame<'_> {
         let stale = &preview.key != key;
         match &preview.text {
             Ok(text) => {
-                let ultimate = matches!(row.kind, Kind::Ultimate | Kind::Conversation);
+                let ultimate =
+                    matches!(row.kind, Kind::Ultimate | Kind::Conversation | Kind::Inbox);
                 let lines = if ultimate {
                     wrap(text, content.width)
                 } else {
@@ -795,7 +811,11 @@ impl Frame<'_> {
             }
             (Mode::List, Some(Note::Info(text))) => Line::styled(text.clone(), theme::muted()),
             (Mode::List, None) => {
-                let mut spans = vec![key("↵"), label("go")];
+                let inbox = self
+                    .app
+                    .current()
+                    .is_some_and(|(row, _)| row.kind == Kind::Inbox);
+                let mut spans = vec![key("↵"), label(if inbox { "open inbox" } else { "go" })];
                 if !self.app.query.is_empty() {
                     spans.extend([key("esc"), label("clear")]);
                 } else if let Some((row, parent)) = self.app.current() {

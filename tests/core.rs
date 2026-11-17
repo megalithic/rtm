@@ -367,3 +367,109 @@ fn dead_phoenix_apps_are_hidden() {
     .unwrap();
     assert!(rtm::registry::apps_for(&dead, &["/r/x"]).is_empty());
 }
+
+fn messages_doc() -> serde_json::Value {
+    json!({"next": 6, "messages": [
+        {"id": 1, "from": 2, "to": "user", "text": "**Ship it?** The branch is green.", "at": 300, "reply": true, "state": "delivered"},
+        {"id": 2, "from": 2, "to": "user", "text": "Old question", "at": 100, "reply": true, "state": "answered"},
+        {"id": 3, "from": 2, "to": "user", "text": "FYI only", "at": 110, "reply": false, "state": "delivered"},
+        {"id": 4, "from": 2, "to": 3, "text": "agent to agent", "at": 120, "reply": true, "state": "delivered"},
+        {"id": 5, "from": 3, "to": "user", "text": "## Pick a name\nmore", "at": 50, "reply": true, "state": "delivered",
+         "questions": [{"text": "Which name?", "kind": "choice"}]}
+    ]})
+}
+
+fn items_doc() -> serde_json::Value {
+    json!({"next": 4, "items": [
+        {"id": 1, "kind": "artifact", "title": "Drawer part page", "text": "", "conversation": 48, "at": 200},
+        {"id": 2, "kind": "action", "title": "Done already", "text": "", "conversation": 48, "at": 10, "done": 999},
+        {"id": 3, "kind": "link", "title": "Preview", "text": "", "conversation": 48, "at": 400, "url": "http://localhost:4000"}
+    ]})
+}
+
+#[test]
+fn inbox_counts_open_questions_and_items_oldest_first() {
+    use rtm::ultimate::{doc_result, inbox};
+    let entries = inbox(Some(&messages_doc()), Some(&items_doc()));
+    assert_eq!(
+        entries
+            .iter()
+            .map(|entry| entry.key.as_str())
+            .collect::<Vec<_>>(),
+        ["message:5", "inbox-items:1", "message:1", "inbox-items:3"]
+    );
+    assert_eq!(entries[0].title, "Pick a name");
+    assert_eq!(entries[0].detail.as_deref(), Some("Which name?"));
+    assert_eq!(entries[2].title, "Ship it?"); // Bold lead.
+    assert_eq!(entries[1].kind, "artifact");
+    // An instance without the inbox-items extension: questions only, not an error.
+    let missing =
+        doc_result(json!({"error": "Unknown conversation document: inbox-items.items"})).unwrap();
+    assert!(missing.is_none());
+    assert_eq!(inbox(Some(&messages_doc()), missing.as_ref()).len(), 2);
+    assert!(doc_result(json!({"error": "boom"})).is_err());
+    assert_eq!(
+        doc_result(json!({"result": {"items": []}})).unwrap(),
+        Some(json!({"items": []}))
+    );
+    assert!(inbox(None, None).is_empty());
+}
+
+#[test]
+fn inbox_row_leads_subrows_and_only_questions_need_you() {
+    use rtm::ultimate::inbox;
+    let mut fixture = Fixture::load();
+    // Items only: the Inbox shows, quietly; the instance's attention is unchanged.
+    fixture.ultimates[1].inbox = inbox(None, Some(&items_doc()));
+    let model = fixture.model();
+    let quiet = model.groups[0]
+        .rows
+        .iter()
+        .find(|row| row.key.ends_with("search"))
+        .unwrap();
+    assert!(!quiet.attention);
+    let row = &quiet.children[0];
+    assert_eq!((row.kind, row.name.as_str()), (Kind::Inbox, "Inbox"));
+    assert_eq!(row.metadata.agent_count, 2);
+    assert!(!row.attention);
+    assert!(
+        matches!(&row.jump, JumpTarget::Inbox { url, key } if url == "http://127.0.0.1:4701" && key == "inbox-items:1")
+    );
+    assert!(matches!(&row.preview, Some(PreviewSource::Inbox { entries }) if entries.len() == 2));
+    // Searchable by "inbox" and by an item's title.
+    for query in ["inbox", "Drawer part"] {
+        assert!(
+            search::search(&model, query)
+                .iter()
+                .any(|hit| hit.children.iter().any(|child| child.child == 0)),
+            "{query}"
+        );
+    }
+    // A question: the Inbox needs you. It leads, and the five conversation rows stay.
+    let base = fixture.ultimates[0].conversations[0].clone();
+    for id in 50..60 {
+        fixture.ultimates[0]
+            .conversations
+            .push(rtm::ultimate::Conversation {
+                id,
+                busy: true,
+                ..base.clone()
+            });
+    }
+    fixture.ultimates[0].inbox = inbox(Some(&messages_doc()), None);
+    let model = fixture.model();
+    let atlas = &model.groups[0].rows[0];
+    assert_eq!(atlas.children[0].kind, Kind::Inbox);
+    assert!(atlas.children[0].attention);
+    assert_eq!(atlas.children[0].state, "blocked");
+    assert_eq!(atlas.children.len(), 6);
+    assert_eq!(atlas.metadata.hidden, 9);
+    // No open entries: no row.
+    fixture.ultimates[0].inbox.clear();
+    assert!(
+        fixture.model().groups[0].rows[0]
+            .children
+            .iter()
+            .all(|row| row.kind != Kind::Inbox)
+    );
+}

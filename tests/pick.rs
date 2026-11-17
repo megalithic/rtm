@@ -640,3 +640,98 @@ fn timing_markdown_preview() {
     let render = start.elapsed() / runs;
     println!("syntax+theme load: {load:?}; 40-entry render: {render:?}");
 }
+
+#[test]
+fn inbox_jump_sets_the_surface_then_raises_its_tab() {
+    let fake = Fake {
+        tabs: Some(TABS),
+        ..Fake::default()
+    };
+    actions::jump_inbox(&fake, "http://127.0.0.1:4700", "message:5").unwrap();
+    let calls = fake.calls.borrow();
+    assert_eq!(
+        calls[0],
+        r#"POST http://127.0.0.1:4700/api/ui Origin=http://127.0.0.1:4700,Content-Type=application/json {"set":{"shell.surface":"inbox"}}"#
+    );
+    assert!(calls[1].ends_with("/json/list  "));
+    assert!(calls[2].ends_with("/json/activate/A  "));
+    assert_eq!(calls[3], "run open -a Helium");
+    // No tab: the surface is still set, then a new tab opens on the oldest entry.
+    let fake = Fake::default();
+    actions::jump_inbox(&fake, "http://127.0.0.1:4700", "inbox-items:3").unwrap();
+    let calls = fake.calls.borrow();
+    assert!(calls[0].contains(r#"{"set":{"shell.surface":"inbox"}}"#));
+    assert_eq!(
+        calls.last().unwrap(),
+        "run open http://127.0.0.1:4700/?inbox=inbox-items:3"
+    );
+}
+
+#[test]
+fn inbox_preview_lists_entries_with_kind_and_amber_waits() {
+    use ratatui::style::Color;
+    use rtm::{pick::preview::inbox_text, ultimate::InboxEntry};
+    let entry = |key: &str, kind: &str, title: &str, at: u64, detail: Option<&str>| InboxEntry {
+        key: key.into(),
+        kind: kind.into(),
+        title: title.into(),
+        detail: detail.map(Into::into),
+        at,
+    };
+    let now = 10 * 3_600_000;
+    let text = inbox_text(
+        &[
+            entry(
+                "message:1",
+                "question",
+                "Ship it?",
+                now - 2 * 3_600_000,
+                Some("Which branch?"),
+            ),
+            entry("inbox-items:2", "link", "Preview", now - 60_000, None),
+        ],
+        now,
+    );
+    let lines: Vec<String> = text.lines.iter().map(ToString::to_string).collect();
+    assert_eq!(lines[0], "question  Ship it?  2h");
+    assert_eq!(lines[1], "          Which branch?");
+    assert_eq!(lines[2], "link      Preview  1m");
+    let age = |line: usize| text.lines[line].spans.last().unwrap().style.fg;
+    assert_eq!(age(0), Some(Color::Indexed(3))); // Over an hour: amber.
+    assert_eq!(age(2), Some(Color::Indexed(8)));
+}
+
+#[test]
+fn enter_on_the_inbox_row_jumps_to_the_inbox() {
+    let mut model = model();
+    model.groups[0].rows[0].children.insert(
+        0,
+        rtm::model::Row {
+            key: "ult:/Users/demo/code/atlas/inbox".into(),
+            kind: rtm::model::Kind::Inbox,
+            name: "Inbox".into(),
+            state: "blocked".into(),
+            attention: true,
+            last_viewed: 0,
+            last_activity: 1,
+            metadata: Default::default(),
+            jump: rtm::model::JumpTarget::Inbox {
+                url: "http://127.0.0.1:4700".into(),
+                key: "message:9".into(),
+            },
+            preview: None,
+            details: vec!["inbox".into()],
+            children: Vec::new(),
+        },
+    );
+    let mut app = App::new(model);
+    app.key(key("ctrl+n"));
+    assert_eq!(selected_name(&app), "Inbox");
+    match app.key(key("enter")) {
+        Command::Jump { row, seen } => {
+            assert!(matches!(row.jump, rtm::model::JumpTarget::Inbox { .. }));
+            assert_eq!(seen[0], "ult:/Users/demo/code/atlas/inbox");
+        }
+        other => panic!("{other:?}"),
+    }
+}

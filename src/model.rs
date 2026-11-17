@@ -20,6 +20,7 @@ pub enum Kind {
     Rex,
     Conversation,
     Agent,
+    Inbox,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -93,13 +94,24 @@ pub enum JumpTarget {
         conversation: u64,
         rex: Option<Location>,
     },
+    /// The instance's Inbox; `key` names the oldest entry for a new tab's `?inbox=`.
+    Inbox { url: String, key: String },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PreviewSource {
-    Rex { block: String },
-    Ultimate { url: String, conversation: u64 },
+    Rex {
+        block: String,
+    },
+    Ultimate {
+        url: String,
+        conversation: u64,
+    },
+    /// Drawn from the model itself, so it needs no fetch.
+    Inbox {
+        entries: Vec<ultimate::InboxEntry>,
+    },
 }
 
 pub struct Inputs<'a> {
@@ -257,6 +269,48 @@ fn conversation_row(
     }
 }
 
+/// `Inbox  N` for an instance with open questions or items. Only questions are attention, as
+/// for the instance; items wait quietly.
+fn inbox_row(instance: &ultimate::Instance, parent: &str, inputs: &Inputs<'_>) -> Option<Row> {
+    let oldest = instance.inbox.first()?;
+    let key = format!("{parent}/inbox");
+    let questions = instance
+        .inbox
+        .iter()
+        .filter(|entry| entry.kind == "question")
+        .count();
+    Some(Row {
+        last_viewed: seen(inputs.seen, &key),
+        key,
+        kind: Kind::Inbox,
+        name: "Inbox".into(),
+        state: if questions > 0 { "blocked" } else { "idle" }.into(),
+        attention: questions > 0,
+        last_activity: instance
+            .inbox
+            .iter()
+            .map(|entry| entry.at)
+            .max()
+            .unwrap_or_default(),
+        metadata: Metadata {
+            project: Some(instance.project.clone()),
+            agent_count: instance.inbox.len(),
+            ..Metadata::default()
+        },
+        jump: JumpTarget::Inbox {
+            url: instance.url(),
+            key: oldest.key.clone(),
+        },
+        preview: Some(PreviewSource::Inbox {
+            entries: instance.inbox.clone(),
+        }),
+        details: std::iter::once("inbox".to_owned())
+            .chain(instance.inbox.iter().map(|entry| entry.title.clone()))
+            .collect(),
+        children: Vec::new(),
+    })
+}
+
 pub fn build(inputs: &Inputs<'_>) -> Model {
     let mut folded: BTreeSet<(&str, &str)> = BTreeSet::new();
     let mut locations = BTreeMap::new();
@@ -354,6 +408,8 @@ pub fn build(inputs: &Inputs<'_>) -> Model {
         let agent_count = all.len();
         let hidden = agent_count.saturating_sub(MAX_CONVERSATIONS);
         all.truncate(MAX_CONVERSATIONS);
+        // The Inbox leads the instance's sub-rows; it is not one of the conversations the limit cuts.
+        let inbox = inbox_row(instance, &key, inputs);
         let conversation = all
             .first()
             .and_then(|row| match row.jump {
@@ -415,7 +471,13 @@ pub fn build(inputs: &Inputs<'_>) -> Model {
                 conversation,
             }),
             details,
-            children: if agent_count > 1 { all } else { Vec::new() },
+            children: {
+                let mut children = if agent_count > 1 { all } else { Vec::new() };
+                if let Some(inbox) = inbox {
+                    children.insert(0, inbox);
+                }
+                children
+            },
         });
     }
     let mut sessions = Vec::new();

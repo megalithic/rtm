@@ -153,20 +153,40 @@ pub fn focus_or_open(io: &dyn Io, base: &str, fallback: &str) -> Result<()> {
 
 /// Every open tab of the instance switches to the conversation; then its tab is raised.
 pub fn jump_ultimate(io: &dyn Io, url: &str, conversation: u64) -> Result<()> {
-    let body = serde_json::json!({"set": {"shell.conversation": conversation}}).to_string();
+    show(
+        io,
+        url,
+        serde_json::json!({"shell.conversation": conversation}),
+        &format!("{url}/?conversation={conversation}"),
+    )
+}
+
+/// Every open tab of the instance switches to its Inbox. A new tab opens on `key`, the oldest
+/// entry; an existing tab shows the Inbox's own selection (it is per tab, in the browser).
+pub fn jump_inbox(io: &dyn Io, url: &str, key: &str) -> Result<()> {
+    show(
+        io,
+        url,
+        serde_json::json!({"shell.surface": "inbox"}),
+        &format!("{url}/?inbox={key}"),
+    )
+}
+
+/// Sets `state` in every open tab of the instance, then raises one; `fallback` opens otherwise.
+fn show(io: &dyn Io, url: &str, state: serde_json::Value, fallback: &str) -> Result<()> {
+    let body = serde_json::json!({ "set": state }).to_string();
     let switched = io.http(
         "POST",
         &format!("{url}/api/ui"),
         &[("Origin", url), ("Content-Type", "application/json")],
         Some(&body),
     );
-    let fallback = format!("{url}/?conversation={conversation}");
-    // Without the switch, an existing tab would show the wrong conversation: open the link.
+    // Without the switch, an existing tab would show the wrong place: open the link.
     if switched.is_err() {
-        io.run("open", &[&fallback], None)?;
+        io.run("open", &[fallback], None)?;
         return Ok(());
     }
-    focus_or_open(io, url, &fallback)
+    focus_or_open(io, url, fallback)
 }
 
 pub fn jump_rex(
@@ -221,6 +241,7 @@ pub fn jump(io: &dyn Io, client: Option<&str>, row: &Row) -> Result<()> {
         JumpTarget::Ultimate {
             url, conversation, ..
         } => jump_ultimate(io, url, *conversation),
+        JumpTarget::Inbox { url, key } => jump_inbox(io, url, key),
     }
 }
 

@@ -511,7 +511,7 @@ impl App {
             JumpTarget::Rex { session, .. } => {
                 Some((session.clone(), parent.unwrap_or(row).name.clone()))
             }
-            JumpTarget::Ultimate { .. } => None,
+            JumpTarget::Ultimate { .. } | JumpTarget::Inbox { .. } => None,
         });
         match target {
             Some((session, name)) => self.mode = Mode::Kill { session, name },

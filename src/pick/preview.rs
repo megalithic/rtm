@@ -83,7 +83,48 @@ fn load(request: &Request) -> anyhow::Result<Text<'static>> {
         PreviewSource::Ultimate { url, conversation } => {
             Ok(conversation_text(&ultimate::entries(url, *conversation)?))
         }
+        PreviewSource::Inbox { entries } => Ok(inbox_text(entries, crate::now_ms())),
     }
+}
+
+/// One line per waiting thing, oldest first: its kind, its title, how long it has waited (amber
+/// past an hour, as Ultimate shows it); a question's first question dim beneath.
+pub fn inbox_text(entries: &[ultimate::InboxEntry], now: u64) -> Text<'static> {
+    const HOUR: u64 = 3_600_000;
+    let tag_width = entries
+        .iter()
+        .map(|entry| entry.kind.len())
+        .max()
+        .unwrap_or_default();
+    let mut lines = Vec::new();
+    for entry in entries {
+        let tag = Style::new().fg(if entry.kind == "question" {
+            Color::Indexed(3)
+        } else {
+            Color::Indexed(8)
+        });
+        let waited = now.saturating_sub(entry.at);
+        let age = Style::new().fg(if waited > HOUR {
+            Color::Indexed(3)
+        } else {
+            Color::Indexed(8)
+        });
+        lines.push(Line::from(vec![
+            Span::styled(format!("{:<tag_width$}  ", entry.kind), tag),
+            Span::raw(entry.title.clone()),
+            Span::styled(format!("  {}", super::ui::age(now, entry.at)), age),
+        ]));
+        if let Some(detail) = &entry.detail {
+            lines.push(Line::styled(
+                format!("{:tag_width$}  {}", "", first_line(detail, 160)),
+                dim(),
+            ));
+        }
+    }
+    if lines.is_empty() {
+        lines.push(Line::styled("nothing waits", dim()));
+    }
+    Text::from(lines)
 }
 
 /// A stuck `rex capture` must not hold the preview worker: later requests queue behind it.

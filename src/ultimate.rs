@@ -22,6 +22,146 @@ pub struct Instance {
     pub conversations: Vec<Conversation>,
     #[serde(default)]
     pub errors: Vec<String>,
+    /// Open questions to the user and open Inbox items, oldest first.
+    #[serde(default)]
+    pub inbox: Vec<InboxEntry>,
+}
+
+/// One thing in an instance's Inbox: a question to the user or an item an extension provides.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct InboxEntry {
+    /// `message:<id>` or `inbox-items:<id>`, the key `?inbox=` selects.
+    pub key: String,
+    /// `question`, `action`, `artifact` or `link`.
+    pub kind: String,
+    pub title: String,
+    /// A question's first question line, when it asks structured questions.
+    pub detail: Option<String>,
+    pub at: u64,
+}
+
+#[derive(Deserialize)]
+struct Message {
+    id: u64,
+    #[serde(default)]
+    to: Value,
+    #[serde(default)]
+    text: String,
+    #[serde(default)]
+    at: u64,
+    #[serde(default)]
+    reply: bool,
+    #[serde(default)]
+    state: String,
+    #[serde(default)]
+    questions: Vec<MessageQuestion>,
+}
+
+#[derive(Deserialize)]
+struct MessageQuestion {
+    text: String,
+}
+
+#[derive(Deserialize)]
+struct Item {
+    id: u64,
+    kind: String,
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    at: u64,
+    #[serde(default)]
+    done: Option<Value>,
+}
+
+/// A message's title as the Inbox shows it: a bold lead, or else its first line without Markdown marks.
+pub fn lead(text: &str) -> String {
+    let trimmed = text.trim_start();
+    if let Some(rest) = trimmed.strip_prefix("**")
+        && let Some(end) = rest.find("**")
+        && end > 0
+    {
+        return rest[..end].trim().to_owned();
+    }
+    trimmed
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .trim_start_matches(['#', '>', '-', '*', ' ', '\t'])
+        .replace(['*', '_', '`'], "")
+        .trim()
+        .to_owned()
+}
+
+/// The Inbox from the Messages document and the inbox-items document (either may be absent),
+/// oldest first. A question is open as the Inbox counts it: to the user, expecting a reply,
+/// delivered; an item is open until it is done.
+pub fn inbox(messages: Option<&Value>, items: Option<&Value>) -> Vec<InboxEntry> {
+    let messages: Vec<Message> = messages
+        .and_then(|doc| serde_json::from_value(doc.get("messages")?.clone()).ok())
+        .unwrap_or_default();
+    let items: Vec<Item> = items
+        .and_then(|doc| serde_json::from_value(doc.get("items")?.clone()).ok())
+        .unwrap_or_default();
+    let mut entries: Vec<InboxEntry> = messages
+        .into_iter()
+        .filter(|m| m.to == "user" && m.reply && m.state == "delivered")
+        .map(|m| InboxEntry {
+            key: format!("message:{}", m.id),
+            kind: "question".into(),
+            title: lead(&m.text),
+            detail: m.questions.first().map(|q| q.text.clone()),
+            at: m.at,
+        })
+        .chain(
+            items
+                .into_iter()
+                .filter(|item| {
+                    item.done
+                        .as_ref()
+                        .is_none_or(|done| done.is_null() || done == &Value::Bool(false))
+                })
+                .map(|item| InboxEntry {
+                    key: format!("inbox-items:{}", item.id),
+                    kind: item.kind,
+                    title: item.title,
+                    detail: None,
+                    at: item.at,
+                }),
+        )
+        .collect();
+    entries.sort_by_key(|entry| entry.at);
+    entries
+}
+
+/// A conversation document, or `None` when the instance does not have it (an extension it lacks).
+fn read_doc(url: &str, kind: &str) -> Result<Option<Value>> {
+    let agent = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(1)))
+        .max_redirects(0)
+        .http_status_as_error(false)
+        .build()
+        .new_agent();
+    let body: Value = agent
+        .post(format!("{url}/api/extensions/codemode/actions/read"))
+        .header("Origin", url)
+        .header("Content-Type", "application/json")
+        .send_json(json!({"args": {"op": "doc", "args": [kind, 1]}}))?
+        .body_mut()
+        .read_json()?;
+    doc_result(body)
+}
+
+/// `{result}` is the document; an unknown document is `None`; any other error is an error.
+pub fn doc_result(body: Value) -> Result<Option<Value>> {
+    if let Some(result) = body.get("result") {
+        return Ok(Some(result.clone()));
+    }
+    match body.get("error").and_then(Value::as_str) {
+        Some(error) if error.starts_with("Unknown conversation document") => Ok(None),
+        Some(error) => anyhow::bail!("{error}"),
+        None => anyhow::bail!("unexpected response"),
+    }
 }
 
 impl Instance {
@@ -186,10 +326,12 @@ pub fn load() -> Result<Vec<Instance>> {
             .map(|mut instance| {
                 scope.spawn(move || {
                     let url = instance.url();
-                    let (status, conversations) = thread::scope(|scope| {
+                    let (status, conversations, messages, items) = thread::scope(|scope| {
                         let status = scope.spawn(|| {
                             read_action::<Status>(&url, "status/actions/status", json!({}))
                         });
+                        let messages = scope.spawn(|| read_doc(&url, "board"));
+                        let items = scope.spawn(|| read_doc(&url, "inbox-items.items"));
                         let conversations = read_action::<Vec<Conversation>>(
                             &url,
                             "codemode/actions/read",
@@ -198,8 +340,19 @@ pub fn load() -> Result<Vec<Instance>> {
                         (
                             status.join().expect("status worker panicked"),
                             conversations,
+                            messages.join().expect("messages worker panicked"),
+                            items.join().expect("inbox items worker panicked"),
                         )
                     });
+                    let messages = messages.unwrap_or_else(|error| {
+                        instance.errors.push(format!("messages: {error:#}"));
+                        None
+                    });
+                    let items = items.unwrap_or_else(|error| {
+                        instance.errors.push(format!("inbox items: {error:#}"));
+                        None
+                    });
+                    instance.inbox = inbox(messages.as_ref(), items.as_ref());
                     match status {
                         Ok(status) => instance.status = Some(status),
                         Err(error) => instance.errors.push(format!("status: {error:#}")),

@@ -202,7 +202,7 @@ fn spawn_refresh(tx: Sender<Message>, now: Receiver<()>) {
 fn preview_interval(kind: &PreviewSource) -> Duration {
     match kind {
         PreviewSource::Rex { .. } => Duration::from_millis(250),
-        PreviewSource::Ultimate { .. } => Duration::from_secs(1),
+        PreviewSource::Ultimate { .. } | PreviewSource::Inbox { .. } => Duration::from_secs(1),
     }
 }
 
