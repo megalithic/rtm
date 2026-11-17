@@ -707,7 +707,8 @@ impl Frame<'_> {
                         line.spans
                             .iter()
                             .map(|span| {
-                                let mut style = span.style;
+                                // Markdown headings style the whole line, not their spans.
+                                let mut style = line.style.patch(span.style);
                                 if style.bg == Some(Color::Reset) {
                                     style.bg = None;
                                 }
@@ -857,27 +858,62 @@ pub fn wrap(text: &Text<'static>, width: u16) -> Vec<Line<'static>> {
     let width = usize::from(width.max(10));
     let mut out = Vec::new();
     for line in &text.lines {
-        if line.width() <= width || line.spans.len() != 1 {
+        let tool = line
+            .spans
+            .first()
+            .is_some_and(|span| span.content == super::preview::TOOL_MARK);
+        if line.width() <= width || tool {
             out.push(line.clone());
             continue;
         }
-        let style = line.spans[0].style;
-        let mut current = String::new();
-        for word in line.spans[0].content.split(' ') {
-            if !current.is_empty() && current.width() + 1 + word.width() > width {
-                out.push(Line::styled(std::mem::take(&mut current), style));
-            }
-            if !current.is_empty() {
-                current.push(' ');
-            }
-            current.push_str(word);
-            while current.width() > width {
-                let cut: String = current.chars().take(width).collect();
-                current = current.chars().skip(width).collect();
-                out.push(Line::styled(cut, style));
+        // Styled words: (text, style), each word keeping the space that followed it.
+        let mut words: Vec<(String, Style)> = Vec::new();
+        for span in &line.spans {
+            let style = line.style.patch(span.style);
+            for word in span.content.split_inclusive(' ') {
+                words.push((word.to_owned(), style));
             }
         }
-        out.push(Line::styled(current, style));
+        // A list item or quote continues under its text, not under its marker.
+        let lead: String = line
+            .spans
+            .iter()
+            .flat_map(|span| span.content.chars())
+            .take_while(|c| {
+                matches!(c, ' ' | '-' | '*' | '>' | '•') || c.is_ascii_digit() || *c == '.'
+            })
+            .collect();
+        let indent = " ".repeat(lead.width().min(width / 2));
+        let mut current: Vec<Span<'static>> = Vec::new();
+        let mut used = 0;
+        // A finished row drops its trailing space, so it fits the width exactly.
+        let finish = |spans: &mut Vec<Span<'static>>| {
+            let mut spans = std::mem::take(spans);
+            if let Some(last) = spans.last_mut() {
+                last.content = last.content.trim_end().to_owned().into();
+            }
+            Line::from(spans)
+        };
+        for (word, style) in words {
+            let mut word = word;
+            if used > 0 && used + word.trim_end().width() > width {
+                out.push(finish(&mut current));
+                current.push(Span::raw(indent.clone()));
+                used = indent.width();
+            }
+            while used + word.trim_end().width() > width {
+                let room = width.saturating_sub(used).max(1);
+                let cut: String = word.chars().take(room).collect();
+                word = word.chars().skip(room).collect();
+                current.push(Span::styled(cut, style));
+                out.push(finish(&mut current));
+                current.push(Span::raw(indent.clone()));
+                used = indent.width();
+            }
+            used += word.width();
+            current.push(Span::styled(word, style));
+        }
+        out.push(finish(&mut current));
     }
     out
 }

@@ -11,9 +11,12 @@ crossterm = "0.29"
 dirs = "6"
 libc = "0.2"
 nucleo-matcher = "0.3"
+pulldown-cmark = { version = "0.13", default-features = false }
 ratatui = "0.30"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+syntect = { version = "5.3", default-features = false, features = ["default-syntaxes", "plist-load", "regex-fancy"] }
 tachyonfx = "0.25"
+tui-markdown = { version = "0.3.13", default-features = false }
 unicode-width = "0.2"
 ureq = { version = "3", default-features = false, features = ["json"] }

@@ -1,6 +1,7 @@
 //! `rtm pick`: the launcher TUI. The first frame comes from the cached model; a background
 //! thread refreshes it. The loop sleeps until input, data or an animation frame is due.
 pub mod actions;
+pub mod markdown;
 pub mod motion;
 pub mod preview;
 pub mod state;

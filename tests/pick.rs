@@ -528,3 +528,115 @@ fn ctrl_shift_t_on_an_ultimate_row_reads_the_branch_from_its_checkout() {
     assert_eq!(app.mode, Mode::List);
     assert!(app.note.is_some());
 }
+
+fn has_rgb(lines: &[ratatui::text::Line]) -> bool {
+    use ratatui::style::Color;
+    lines.iter().flat_map(|line| &line.spans).any(|span| {
+        matches!(span.style.fg, Some(Color::Rgb(..)))
+            || matches!(span.style.bg, Some(Color::Rgb(..)))
+    })
+}
+
+#[test]
+fn markdown_code_uses_the_terminal_palette() {
+    use ratatui::style::Color;
+    use rtm::pick::markdown;
+    let lines =
+        markdown::render("Call `answer()` first.\n\n```rust\nfn answer() -> u32 { 42 }\n```\n");
+    assert!(!has_rgb(&lines), "{lines:?}");
+    let span = |text: &str| {
+        lines
+            .iter()
+            .flat_map(|line| &line.spans)
+            .find(|span| span.content.contains(text))
+            .unwrap_or_else(|| panic!("no {text} in {lines:?}"))
+            .clone()
+    };
+    // Inline code and the fenced block's keyword, type and number each carry a palette index.
+    assert!(matches!(span("answer()").style.fg, Some(Color::Indexed(_))));
+    for token in ["fn", "u32", "42"] {
+        assert!(
+            matches!(span(token).style.fg, Some(Color::Indexed(_))),
+            "{token}: {lines:?}"
+        );
+    }
+    assert_ne!(span("fn").style.fg, span("42").style.fg);
+    // The fence itself is not shown.
+    assert!(!lines.iter().any(|line| line.to_string().contains("```")));
+    // Shell commands in tool lines highlight the same way.
+    let shell = markdown::shell("mix test --max-failures 1 | tail -5");
+    assert!(
+        shell
+            .iter()
+            .any(|span| matches!(span.style.fg, Some(Color::Indexed(_))))
+    );
+}
+
+#[test]
+fn conversation_preview_has_markdown_tools_and_no_truecolor() {
+    use ratatui::style::Color;
+    use rtm::pick::preview::conversation_text;
+    let entries: Vec<serde_json::Value> =
+        serde_json::from_str(include_str!("fixtures/conversation.json")).unwrap();
+    let text = conversation_text(&entries);
+    assert!(!has_rgb(&text.lines));
+    let rendered: Vec<String> = text.lines.iter().map(ToString::to_string).collect();
+    assert_eq!(rendered[0], "you");
+    let edit = text
+        .lines
+        .iter()
+        .find(|line| line.to_string().contains("▸ edit"))
+        .unwrap();
+    assert!(
+        edit.spans
+            .iter()
+            .any(|span| span.style.fg == Some(Color::Indexed(4))
+                && span.content.contains("router.ex"))
+    );
+    // Wrapping keeps each span's colour.
+    let wrapped = rtm::pick::ui::wrap(&text, 40);
+    for line in &wrapped {
+        let text = line.to_string();
+        // Tool lines stay whole (one row each, clipped when drawn); everything else fits.
+        assert!(
+            text.starts_with("  ▸ ") || line.width() <= 40,
+            "{} {text:?}",
+            line.width()
+        );
+    }
+    let tools = wrapped
+        .iter()
+        .filter(|line| line.to_string().starts_with("  ▸ "))
+        .count();
+    assert_eq!(tools, 3);
+    assert!(!has_rgb(&wrapped));
+    assert!(
+        rendered
+            .iter()
+            .any(|line| line.contains("Fixed the login redirect"))
+    );
+}
+
+/// `cargo test --release --test pick timing -- --ignored --nocapture`
+#[test]
+#[ignore]
+fn timing_markdown_preview() {
+    use std::time::Instant;
+    let start = Instant::now();
+    rtm::pick::markdown::warm();
+    let load = start.elapsed();
+    let one: Vec<serde_json::Value> =
+        serde_json::from_str(include_str!("fixtures/conversation.json")).unwrap();
+    let entries: Vec<serde_json::Value> = one.iter().cycle().take(40).cloned().collect();
+    let start = Instant::now();
+    std::hint::black_box(rtm::pick::preview::conversation_text(&entries));
+    let first = start.elapsed();
+    println!("first (cold) 40-entry render: {first:?}");
+    let runs = 50;
+    let start = Instant::now();
+    for _ in 0..runs {
+        std::hint::black_box(rtm::pick::preview::conversation_text(&entries));
+    }
+    let render = start.elapsed() / runs;
+    println!("syntax+theme load: {load:?}; 40-entry render: {render:?}");
+}

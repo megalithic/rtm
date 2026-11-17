@@ -187,17 +187,37 @@ fn field(json: &str, key: &str) -> Option<String> {
     Some(out)
 }
 
-fn tool_summary(name: &str, args: &str) -> String {
+/// Starts every tool line; wrapping leaves these lines whole (the preview clips them).
+pub const TOOL_MARK: &str = "  ▸ ";
+
+/// One tool call as one line: its name in an accent, a shell command highlighted, a path in
+/// blue, anything else dim, so prose stays primary.
+fn tool_line(name: &str, args: &str) -> Line<'static> {
     let home = dirs::home_dir().map(|home| home.to_string_lossy().into_owned());
-    let detail = ["command", "path", "url", "text", "action", "code"]
-        .iter()
-        .find_map(|key| field(args, key))
-        .unwrap_or_default();
-    let detail = match &home {
-        Some(home) => detail.replace(home.as_str(), "~"),
-        None => detail,
+    let tilde = |text: String| match &home {
+        Some(home) => text.replace(home.as_str(), "~"),
+        None => text,
     };
-    format!("{name}  {}", first_line(&detail, 120))
+    let mut spans = vec![
+        Span::styled(TOOL_MARK, dim()),
+        Span::styled(name.to_owned(), Style::new().fg(Color::Indexed(5))),
+        Span::raw("  "),
+    ];
+    if let Some(command) = field(args, "command") {
+        spans.extend(super::markdown::shell(&first_line(&tilde(command), 120)));
+    } else if let Some(path) = field(args, "path") {
+        spans.push(Span::styled(
+            first_line(&tilde(path), 120),
+            Style::new().fg(Color::Indexed(4)),
+        ));
+    } else {
+        let detail = ["url", "text", "action", "code"]
+            .iter()
+            .find_map(|key| field(args, key))
+            .unwrap_or_default();
+        spans.push(Span::styled(first_line(&tilde(detail), 120), dim()));
+    }
+    Line::from(spans)
 }
 
 /// Who spoke, what was said, and one dim line per tool call. Oldest at the top.
@@ -243,13 +263,10 @@ pub fn conversation_text(entries: &[Value]) -> Text<'static> {
                     Style::new().fg(colour).add_modifier(Modifier::BOLD),
                 ));
             }
-            let body = if speaker == "note" {
-                vec![first_line(text, 140)]
+            if speaker == "note" {
+                lines.push(Line::raw(first_line(text, 140)));
             } else {
-                text.lines().map(str::to_owned).collect()
-            };
-            for line in body {
-                lines.push(Line::raw(line));
+                lines.extend(super::markdown::render(text));
             }
             last_speaker = speaker;
         }
@@ -261,10 +278,7 @@ pub fn conversation_text(entries: &[Value]) -> Text<'static> {
         {
             let name = tool.get("name").and_then(Value::as_str).unwrap_or("tool");
             let args = tool.get("args").and_then(Value::as_str).unwrap_or_default();
-            lines.push(Line::from(vec![
-                Span::styled("  ▸ ", dim()),
-                Span::styled(tool_summary(name, args), dim()),
-            ]));
+            lines.push(tool_line(name, args));
             // Text after a tool call names its speaker again.
             last_speaker = "";
         }
