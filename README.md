@@ -4,7 +4,18 @@ A launcher for [Rex](https://www.superlogical.com/rex) that lists what is runnin
 conversations, Rex sessions and the agents in them — puts what needs you first, previews the highlighted one, and
 jumps there.
 
-The data layer is implemented; the floating Rex layer, previews and keys below are planned UI work.
+```sh
+rtm pick [<client_id> [<block_id>]]   # the launcher; Rex opens it in a floating layer
+rtm kill <session_id> [<client_id>]   # a small "kill <name>?" prompt; y runs rwt down
+```
+
+`rtm pick` draws its first frame from the last model cached in `~/.cache/rtm/model.json`
+(about 1 ms), then refreshes live in the background. Typing searches. The highlighted row's
+preview is the bottom of its Rex block (`rex capture --format vt`) or the last 40 entries of
+its Ultimate conversation, refreshed while highlighted. Jumps focus the Rex block, or switch
+the Ultimate instance's tabs to the conversation and raise its Helium tab over CDP
+(`PIDEWAVE_CDP_PORT`, default 9223). `--bench-first-frame` prints the first-frame time;
+`--keys "ctrl+n ctrl+k"` presses keys before the first frame.
 
 ## Data layer
 
@@ -16,7 +27,7 @@ rtm seen 'session:<id>'               # fast, atomic last-viewed update; no disc
 
 Rex is read through the embedded `src/rex/snapshot.lua` with autostart disabled. Ultimate
 lockfiles are checked with signal 0; only the status, conversations and entries read actions
-are used. No sessions are created, focused, killed or otherwise modified.
+are used. Snapshots never create, focus, kill or otherwise modify sessions; only `rtm pick` actions do.
 
 Registry and PR refreshes use a background subprocess so they complete even after the snapshot
 command exits. Registry refreshes each time; PRs refresh after 60 seconds. The default cache is
@@ -52,9 +63,9 @@ cargo clippy --all-targets -- -D warnings
 cargo fmt --all -- --check
 ```
 
-See `tests/fixtures/README.md` for fixture provenance. No ratatui or async runtime is needed.
+See `tests/fixtures/README.md` for fixture provenance.
 
-## Keys (planned)
+## Keys
 
 | Key | Does |
 | --- | --- |
@@ -64,9 +75,11 @@ See `tests/fixtures/README.md` for fixture provenance. No ratatui or async runti
 | enter | go to the session, or focus the Ultimate tab on that conversation |
 | ctrl+o | open or focus Tidewave Connect for the row's Phoenix app |
 | ctrl+t | new worktree (`rwt new`) from the row's repository, based on origin's default branch |
-| ctrl+shift+t | new worktree based on the highlighted worktree's branch |
+| ctrl+shift+t | new worktree based on the highlighted row's branch (read from git for Ultimate rows) |
 | ctrl+k | `kill <name>?`, then y: stop the session's processes (`rwt down`), keeping the worktree |
-| esc | close |
+| esc | clear the search, then close |
+
+Clicking a PR number opens it in the browser.
 
 ## Install
 
