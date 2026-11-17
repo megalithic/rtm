@@ -489,6 +489,20 @@ fn tiny_buffers_render_without_panicking() {
     };
     assert!(row(0).contains("kill box?"));
     assert!(row(1).contains("y kill"));
+    // A long name is shortened in the middle; the question mark survives.
+    let mut buf = Buffer::empty(area);
+    draw_kill(
+        &mut buf,
+        area,
+        "provider_portal-sm-admin-auto-enroll-provider",
+    );
+    let row = (0..40)
+        .map(|x| buf[(x, 0)].symbol().to_owned())
+        .collect::<String>();
+    assert!(
+        row.contains("…") && row.trim_end().ends_with("provider?"),
+        "{row}"
+    );
 }
 
 #[test]

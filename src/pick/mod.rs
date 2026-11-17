@@ -742,9 +742,27 @@ pub fn draw_kill(buf: &mut Buffer, area: Rect, name: &str) {
     };
     let block = gap.map_or(1, |gap| gap + 1);
     let y = area.y + (area.height - block) / 2;
+    // A long name loses its middle, so the "?" and the name's distinct end stay readable.
+    let room = usize::from(
+        area.width
+            .saturating_sub(if area.width > 8 { 4 } else { 0 }),
+    )
+    .saturating_sub("kill ?".len());
+    let chars: Vec<char> = name.chars().collect();
+    let name: String = if chars.len() > room && room >= 5 {
+        let tail = (room - 1) * 2 / 3;
+        let head = room - 1 - tail;
+        chars[..head]
+            .iter()
+            .chain(['…'].iter())
+            .chain(&chars[chars.len() - tail..])
+            .collect()
+    } else {
+        name.to_owned()
+    };
     let question = Line::from(vec![
         Span::styled("kill ", Style::new().fg(theme::RED)),
-        Span::styled(name.to_owned(), theme::text().add_modifier(Modifier::BOLD)),
+        Span::styled(name, theme::text().add_modifier(Modifier::BOLD)),
         Span::styled("?", Style::new().fg(theme::RED)),
     ]);
     let hint = Line::from(vec![
