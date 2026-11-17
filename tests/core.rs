@@ -109,13 +109,10 @@ fn ultimate_children_attention_recency_seen_and_root_name() {
             .iter()
             .map(|child| child.name.as_str())
             .collect::<Vec<_>>(),
-        [
-            "migration",
-            "Recent review",
-            "@ultimate",
-            "Background worker"
-        ]
+        // Idle conversations ("Recent review", "@ultimate") fold into "+2 more".
+        ["migration", "Background worker"]
     );
+    assert_eq!(row.metadata.hidden, 2);
     assert!(row.children[0].attention);
     assert_eq!(row.children[0].last_viewed, 1794923000000);
     assert_eq!(row.last_viewed, 1794924500000); // Includes concluded conversations for last-viewed.

@@ -406,10 +406,6 @@ pub fn build(inputs: &Inputs<'_>) -> Model {
             .collect();
         all.sort_by(child_order);
         let agent_count = all.len();
-        let hidden = agent_count.saturating_sub(MAX_CONVERSATIONS);
-        all.truncate(MAX_CONVERSATIONS);
-        // The Inbox leads the instance's sub-rows; it is not one of the conversations the limit cuts.
-        let inbox = inbox_row(instance, &key, inputs);
         let conversation = all
             .first()
             .and_then(|row| match row.jump {
@@ -417,6 +413,21 @@ pub fn build(inputs: &Inputs<'_>) -> Model {
                 _ => None,
             })
             .unwrap_or(1);
+        // Only conversations at work or waiting on the user show; the idle ones fold into "+N more".
+        // A lone conversation is the instance itself: no sub-rows.
+        if agent_count > 1 {
+            all.retain(|row| row.attention || row.state == "working");
+            all.truncate(MAX_CONVERSATIONS);
+        } else {
+            all.clear();
+        }
+        let hidden = if agent_count > 1 {
+            agent_count - all.len()
+        } else {
+            0
+        };
+        // The Inbox leads the instance's sub-rows; it is not one of the conversations the limit cuts.
+        let inbox = inbox_row(instance, &key, inputs);
         let attention = instance
             .status
             .as_ref()
@@ -472,7 +483,7 @@ pub fn build(inputs: &Inputs<'_>) -> Model {
             }),
             details,
             children: {
-                let mut children = if agent_count > 1 { all } else { Vec::new() };
+                let mut children = all;
                 if let Some(inbox) = inbox {
                     children.insert(0, inbox);
                 }
