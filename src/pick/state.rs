@@ -209,6 +209,9 @@ pub struct App {
     pub note: Option<Note>,
     /// Lines scrolled up from the bottom of the preview.
     pub scroll: u16,
+    /// The branch checked out at a path, for rows without branch metadata (Ultimate rows).
+    /// Git by default; tests swap in a fake.
+    pub branch_of: fn(&str) -> Option<String>,
 }
 
 fn ctrl(key: &KeyEvent, letter: char) -> bool {
@@ -238,6 +241,7 @@ impl App {
             mode: Mode::List,
             note: None,
             scroll: 0,
+            branch_of: crate::pick::actions::current_branch,
         };
         app.selected = app.first();
         app
@@ -483,7 +487,8 @@ impl App {
             .metadata
             .branch
             .clone()
-            .or_else(|| parent?.metadata.branch.clone());
+            .or_else(|| parent?.metadata.branch.clone())
+            .or_else(|| (self.branch_of)(&path));
         if off_branch && branch.is_none() {
             self.note = Some(Note::Info("no branch to branch off".into()));
             return Command::None;

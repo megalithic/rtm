@@ -285,3 +285,15 @@ pub fn create(io: &dyn Io, repo: &str, name: &str, base: Option<&str>) -> Result
     io.run(&rwt_bin(), &args, Some(repo))?;
     Ok(())
 }
+
+/// The branch checked out at `path`; none when detached or not in git.
+pub fn current_branch(path: &str) -> Option<String> {
+    let output = Command::new("git")
+        .args(["-C", path, "branch", "--show-current"])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    let branch = String::from_utf8(output.stdout).ok()?.trim().to_owned();
+    (output.status.success() && !branch.is_empty()).then_some(branch)
+}

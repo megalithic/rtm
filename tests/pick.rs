@@ -490,3 +490,27 @@ fn tiny_buffers_render_without_panicking() {
     assert!(row(0).contains("kill box?"));
     assert!(row(1).contains("y kill"));
 }
+
+#[test]
+fn ctrl_shift_t_on_an_ultimate_row_reads_the_branch_from_its_checkout() {
+    fn fake_branch(path: &str) -> Option<String> {
+        (path == "/Users/demo/code/atlas/.worktrees/db").then(|| "db-indexes".to_owned())
+    }
+    let mut app = App::new(model());
+    app.branch_of = fake_branch;
+    // "migration" is a conversation whose cwd is the db worktree; it has no branch metadata.
+    select_named(&mut app, "migration");
+    assert!(app.current().unwrap().0.metadata.branch.is_none());
+    app.key(key("ctrl+shift+t"));
+    assert!(
+        matches!(&app.mode, Mode::Create { base: Some(base), path, .. } if base == "db-indexes" && path.ends_with("/.worktrees/db"))
+    );
+    app.key(key("esc"));
+    // No branch anywhere (the instance's project here): a quiet note, no input.
+    let mut app = App::new(model());
+    app.branch_of = fake_branch;
+    assert_eq!(selected_name(&app), "atlas");
+    app.key(key("ctrl+shift+t"));
+    assert_eq!(app.mode, Mode::List);
+    assert!(app.note.is_some());
+}

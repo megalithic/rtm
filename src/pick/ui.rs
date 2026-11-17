@@ -768,22 +768,22 @@ impl Frame<'_> {
             ]),
             (
                 Mode::Create {
-                    base, busy: false, ..
+                    base,
+                    branch,
+                    busy: false,
+                    ..
                 },
                 _,
             ) => {
                 let mut spans = vec![key("↵"), label("create")];
-                if base.is_none()
-                    && let Some(branch) = self.app.current().and_then(|(row, parent)| {
-                        row.metadata
-                            .branch
-                            .clone()
-                            .or_else(|| parent?.metadata.branch.clone())
-                    })
-                {
-                    spans.extend([key("⇧^t"), label(&format!("off {branch}"))]);
-                } else if base.is_some() {
-                    spans.extend([key("⇧^t"), label("off the default branch")]);
+                match (base, branch) {
+                    (Some(_), _) => {
+                        spans.extend([key("⇧^t"), label("off the default branch")]);
+                    }
+                    (None, Some(branch)) => {
+                        spans.extend([key("⇧^t"), label(&format!("off {branch}"))]);
+                    }
+                    (None, None) => {}
                 }
                 spans.extend([key("esc"), label("cancel")]);
                 Line::from(spans)
