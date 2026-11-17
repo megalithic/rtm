@@ -239,13 +239,25 @@ pub fn kill(io: &dyn Io, session: &str) -> Result<()> {
 }
 
 /// Killing the session rtm runs in kills rtm too: hand the work to a detached process.
+/// Nobody sees its output then, so it goes to `~/.cache/rtm/kill.log`.
 pub fn kill_detached(session: &str) -> Result<()> {
+    let log = crate::cache::root().and_then(|root| {
+        std::fs::create_dir_all(&root)?;
+        Ok(std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(root.join("kill.log"))?)
+    });
+    let (stdout, stderr) = match log.and_then(|file| Ok((file.try_clone()?, file))) {
+        Ok((out, err)) => (Stdio::from(out), Stdio::from(err)),
+        Err(_) => (Stdio::null(), Stdio::null()),
+    };
     let mut command = Command::new(rwt_bin());
     command
         .args(kill_args(session))
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .stdout(stdout)
+        .stderr(stderr);
     unsafe {
         use std::os::unix::process::CommandExt;
         command.pre_exec(|| {
