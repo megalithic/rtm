@@ -2,6 +2,7 @@
 pub mod cache;
 pub mod git;
 pub mod model;
+pub mod pick;
 pub mod registry;
 pub mod rex;
 pub mod search;

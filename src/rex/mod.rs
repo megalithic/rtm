@@ -181,7 +181,7 @@ pub fn load() -> Result<Vec<Session>> {
     decode(&output.stdout).context("decode Rex snapshot")
 }
 
-fn which_rex() -> Option<PathBuf> {
+pub fn which_rex() -> Option<PathBuf> {
     std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
         .map(|dir| dir.join("rex"))
         .chain(std::env::var_os("REX_BIN_DIR").map(|dir| PathBuf::from(dir).join("rex")))

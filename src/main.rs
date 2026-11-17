@@ -1,5 +1,10 @@
-use anyhow::{Result, bail};
-use rtm::{model::Row, seen, snapshot};
+use anyhow::{Context, Result, bail};
+use rtm::{model::Row, pick, seen, snapshot};
+
+const USAGE: &str = "rtm pick [<client_id> [<block_id>]] [--bench-first-frame]
+rtm kill <session_id> [<client_id>]
+rtm snapshot [--json] [--wait] [--timing]
+rtm seen <rex session id>";
 use std::{
     io::{self, Write},
     path::Path,
@@ -55,6 +60,55 @@ fn run() -> Result<()> {
                 }
             }
         }
+        Some("pick") => {
+            let mut positional = Vec::new();
+            let mut keys = Vec::new();
+            let mut bench = false;
+            let mut rest = args[1..].iter();
+            while let Some(arg) = rest.next() {
+                match arg.as_str() {
+                    "--bench-first-frame" => bench = true,
+                    // Keys pressed before the first frame, for states a live Rex binding would eat.
+                    "--keys" => {
+                        for name in rest
+                            .next()
+                            .map(String::as_str)
+                            .unwrap_or_default()
+                            .split_whitespace()
+                        {
+                            keys.push(
+                                pick::parse_key(name)
+                                    .with_context(|| format!("unknown key {name}"))?,
+                            );
+                        }
+                    }
+                    _ if arg.starts_with("--") => bail!("unknown pick option {arg}"),
+                    _ => positional.push(arg.clone()),
+                }
+            }
+            pick::run(pick::Options {
+                client: positional
+                    .first()
+                    .cloned()
+                    .filter(|value| !value.is_empty()),
+                block: positional.get(1).cloned(),
+                keys,
+                bench,
+            })?;
+        }
+        Some("kill") if args.len() >= 2 => {
+            let keys = match args.iter().position(|arg| arg == "--keys") {
+                Some(index) => args
+                    .get(index + 1)
+                    .map(String::as_str)
+                    .unwrap_or_default()
+                    .split_whitespace()
+                    .filter_map(pick::parse_key)
+                    .collect(),
+                None => Vec::new(),
+            };
+            pick::kill_prompt(&args[1], keys)?;
+        }
         Some("seen") if args.len() == 2 => {
             seen::Store::open(seen::path()?)?.mark(&format!("rex:{}", args[1]))?;
         }
@@ -62,9 +116,9 @@ fn run() -> Result<()> {
             snapshot::refresh(Path::new(&args[1]), &args[2..])?;
         }
         Some("--help" | "-h") | None => {
-            println!("rtm snapshot [--json] [--wait] [--timing]\nrtm seen <rex session id>");
+            println!("{USAGE}");
         }
-        _ => bail!("usage: rtm snapshot [--json] [--wait] [--timing] | rtm seen <rex session id>"),
+        _ => bail!("usage:\n{USAGE}"),
     }
     Ok(())
 }
