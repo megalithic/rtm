@@ -296,6 +296,36 @@ fn pr_colours_cover_conflicts_drafts_and_all_failure_states() {
     assert_eq!(pending.colour(), Colour::Blue);
 }
 
+/// The same colours as `rwt pr` (dotfiles 0fce2290): yellow while checks run, green only once
+/// the review is approved or not required.
+#[test]
+fn pr_colours_match_rwt() {
+    let fixture = Fixture::load();
+    let base = fixture.prs.values().next().unwrap()[0].clone();
+    let mut pr = base.clone();
+    pr.status_check_rollup = Some(vec![
+        json!({"__typename":"CheckRun","status":"IN_PROGRESS"}),
+    ]);
+    assert_eq!(pr.colour(), Colour::Yellow);
+    pr.status_check_rollup = Some(vec![
+        json!({"__typename":"StatusContext","state":"PENDING"}),
+    ]);
+    assert_eq!(pr.colour(), Colour::Yellow);
+    // A failure outranks a running check.
+    pr.status_check_rollup
+        .as_mut()
+        .unwrap()
+        .push(json!({"__typename":"CheckRun","status":"COMPLETED","conclusion":"FAILURE"}));
+    assert_eq!(pr.colour(), Colour::Red);
+    pr = base.clone();
+    pr.review_decision = Some("REVIEW_REQUIRED".into());
+    assert_eq!(pr.colour(), Colour::Blue);
+    pr.review_decision = Some("APPROVED".into());
+    assert_eq!(pr.colour(), Colour::Green);
+    pr.merge_state_status = "HAS_HOOKS".into();
+    assert_eq!(pr.colour(), Colour::Green);
+}
+
 #[test]
 fn seen_round_trip_merges_writers_and_rejects_corruption() {
     let dir = std::env::temp_dir().join(format!("rtm-seen-test-{}", std::process::id()));

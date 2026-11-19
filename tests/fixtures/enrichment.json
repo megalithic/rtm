@@ -9,7 +9,7 @@
     "/Users/demo/code/atlas/.worktrees/search":{"path":"/Users/demo/code/atlas/.worktrees/search","repo":"/Users/demo/code/atlas","branch":"search"}
   },
   "prs":{"/Users/demo/code/atlas":[
-    {"number":42,"headRefName":"search","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","statusCheckRollup":[{"conclusion":"SUCCESS"}],"url":"https://github.com/demo/atlas/pull/42"}
+    {"number":42,"headRefName":"search","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","statusCheckRollup":[{"__typename":"CheckRun","status":"COMPLETED","conclusion":"SUCCESS"}],"url":"https://github.com/demo/atlas/pull/42"}
   ]},
   "seen":{"ult:/Users/demo/code/atlas#2":1794923000000}
 }

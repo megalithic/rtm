@@ -34,6 +34,9 @@ pub struct PullRequest {
     pub merge_state_status: String,
     #[serde(default)]
     pub status_check_rollup: Option<Vec<Value>>,
+    /// `APPROVED`, `CHANGES_REQUESTED`, `REVIEW_REQUIRED`, or empty when no review is required.
+    #[serde(default)]
+    pub review_decision: Option<String>,
     pub url: String,
 }
 
@@ -41,11 +44,15 @@ pub struct PullRequest {
 #[serde(rename_all = "snake_case")]
 pub enum Colour {
     Red,
+    Yellow,
     Green,
     Blue,
 }
 
 impl PullRequest {
+    /// rwt's scheme (`rwt pr`), so a PR reads the same everywhere: red for conflicts or a failed
+    /// check, yellow while checks run, green when ready to merge (clean, not a draft, approved
+    /// or no review required), blue for anything else open.
     pub fn colour(&self) -> Colour {
         const FAILURES: &[&str] = &[
             "FAILURE",
@@ -55,17 +62,42 @@ impl PullRequest {
             "ACTION_REQUIRED",
             "STARTUP_FAILURE",
         ];
-        let failed = self.status_check_rollup.iter().flatten().any(|check| {
-            ["conclusion", "state"].iter().any(|field| {
-                check
-                    .get(field)
-                    .and_then(Value::as_str)
-                    .is_some_and(|value| FAILURES.contains(&value))
-            })
-        });
-        if self.mergeable == "CONFLICTING" || self.merge_state_status == "DIRTY" || failed {
+        let field = |check: &Value, name: &str| {
+            check
+                .get(name)
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned()
+        };
+        // As rwt's jq: the conclusion, or the state when there is none.
+        let failed = |check: &Value| {
+            let outcome = check
+                .get("conclusion")
+                .and_then(Value::as_str)
+                .or_else(|| check.get("state").and_then(Value::as_str))
+                .unwrap_or_default();
+            FAILURES.contains(&outcome)
+        };
+        let pending = |check: &Value| {
+            if field(check, "__typename") == "StatusContext" {
+                matches!(field(check, "state").as_str(), "PENDING" | "EXPECTED")
+            } else {
+                field(check, "status") != "COMPLETED"
+            }
+        };
+        let checks = || self.status_check_rollup.iter().flatten();
+        let review = self.review_decision.as_deref().unwrap_or_default();
+        if self.mergeable == "CONFLICTING"
+            || self.merge_state_status == "DIRTY"
+            || checks().any(failed)
+        {
             Colour::Red
-        } else if !self.is_draft && self.merge_state_status == "CLEAN" {
+        } else if checks().any(pending) {
+            Colour::Yellow
+        } else if !self.is_draft
+            && matches!(self.merge_state_status.as_str(), "CLEAN" | "HAS_HOOKS")
+            && matches!(review, "APPROVED" | "")
+        {
             Colour::Green
         } else {
             Colour::Blue
@@ -185,7 +217,7 @@ pub fn refresh(root: &Path, repo: &str) -> Result<Vec<PullRequest>> {
             "--state",
             "open",
             "--json",
-            "number,headRefName,isDraft,mergeable,mergeStateStatus,statusCheckRollup,url",
+            "number,headRefName,isDraft,mergeable,mergeStateStatus,reviewDecision,statusCheckRollup,url",
             "--limit",
             "100",
         ])

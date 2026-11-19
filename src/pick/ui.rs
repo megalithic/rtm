@@ -234,6 +234,7 @@ fn meta(row: &Row, now: u64) -> (Vec<Span<'static>>, Option<(String, usize, usiz
     if let Some(pr) = &row.metadata.pr {
         gap(&mut spans);
         let colour = match pr.colour {
+            Colour::Yellow => YELLOW,
             Colour::Green => GREEN,
             Colour::Blue => BLUE,
             Colour::Red => RED,
