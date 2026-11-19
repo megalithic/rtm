@@ -115,7 +115,7 @@ fn enter_on_a_project_header_goes_to_its_main_session_or_opens_one() {
     match app.key(key("enter")) {
         Command::Jump { row, seen } => {
             assert_eq!(row.name, "atlas-main");
-            assert_eq!(seen, [row.key.clone()]);
+            assert_eq!(seen, std::slice::from_ref(&row.key));
         }
         other => panic!("{other:?}"),
     }
