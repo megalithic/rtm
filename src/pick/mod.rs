@@ -101,6 +101,7 @@ pub fn parse_key(name: &str) -> Option<KeyEvent> {
         "up" => KeyCode::Up,
         "down" => KeyCode::Down,
         "backspace" => KeyCode::Backspace,
+        "tab" => KeyCode::Tab,
         "space" => KeyCode::Char(' '),
         _ if last.chars().count() == 1 => KeyCode::Char(last.chars().next()?),
         _ => return None,
@@ -392,6 +393,13 @@ impl Loop {
                     }
                 }
             }
+            Command::Tell(target) => match actions::tell(&target) {
+                Ok(()) => true,
+                Err(error) => {
+                    self.app.note = Some(Note::Error(format!("{error:#}")));
+                    false
+                }
+            },
             Command::Kill { session, name } => {
                 if self.here.as_deref() == Some(session.as_str()) {
                     return match actions::kill_detached(&session) {

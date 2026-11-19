@@ -247,6 +247,103 @@ fn ctrl_o_opens_tidewave_for_the_rows_app() {
     );
 }
 
+#[test]
+fn tab_tells_the_rows_project_ultimate() {
+    use rtm::model::Kind;
+    use rtm::pick::state::Tell;
+    let mut model = model();
+    // A Rex session outside any repository has no project to tell.
+    let rex = model
+        .groups
+        .iter_mut()
+        .find(|group| group.kind == Kind::Rex)
+        .unwrap();
+    let mut loose = rex.rows[0].clone();
+    loose.key = "rex:loose".into();
+    loose.name = "scratch".into();
+    loose.metadata.repo = None;
+    loose.children.clear();
+    rex.rows.push(loose);
+    // An agent sub-row carries no repo of its own: it tells its session's project.
+    let session = rex
+        .rows
+        .iter_mut()
+        .find(|row| row.name == "atlas-search")
+        .unwrap();
+    let mut agent = session.clone();
+    agent.key = format!("{}/block", session.key);
+    agent.kind = Kind::Agent;
+    agent.name = "claude".into();
+    agent.metadata = Default::default();
+    agent.children.clear();
+    session.children.push(agent);
+    let inbox_url = model.groups[0].rows[0].metadata.origin.clone().unwrap();
+    model.groups[0].rows[0].children.insert(
+        0,
+        rtm::model::Row {
+            key: "ult:inbox".into(),
+            kind: Kind::Inbox,
+            name: "Inbox".into(),
+            state: "idle".into(),
+            attention: false,
+            last_viewed: 0,
+            last_activity: 1,
+            metadata: Default::default(),
+            jump: rtm::model::JumpTarget::Inbox {
+                url: inbox_url,
+                key: "message:9".into(),
+            },
+            preview: None,
+            details: Vec::new(),
+            children: Vec::new(),
+        },
+    );
+    let mut app = App::new(model);
+    let mut seen = std::collections::BTreeSet::new();
+    for index in 0..app.items.len() {
+        if !app.items[index].selectable() {
+            continue;
+        }
+        app.select(index);
+        let (row, parent) = app.current().unwrap();
+        let owner = parent.unwrap_or(row);
+        let expected = match owner.kind {
+            Kind::Ultimate => Some(Tell::Url(owner.metadata.origin.clone().unwrap())),
+            _ => owner.metadata.repo.clone().map(Tell::Project),
+        };
+        assert_eq!(app.tell_target(), expected, "{}", row.name);
+        seen.insert(format!("{:?}/{}", row.kind, expected.is_some()));
+        match app.key(key("tab")) {
+            Command::Tell(target) => assert_eq!(Some(target), expected),
+            Command::None => assert!(expected.is_none()),
+            other => panic!("{other:?}"),
+        }
+    }
+    // Every row kind the fixture has was checked: instances, their conversations, Rex
+    // sessions and their agents, and the loose session without a project.
+    for kind in [
+        "Ultimate/true",
+        "Inbox/true",
+        "Conversation/true",
+        "Rex/true",
+        "Agent/true",
+        "Rex/false",
+    ] {
+        assert!(seen.contains(kind), "{kind} not covered: {seen:?}");
+    }
+    let first = app.items.iter().position(|item| item.selectable()).unwrap();
+    app.select(first);
+    assert_eq!(
+        app.tell_target().unwrap().args(),
+        ["show", "tell", "--url", "http://127.0.0.1:4700"]
+    );
+    select_named(&mut app, "atlas-search");
+    assert_eq!(
+        app.tell_target().unwrap().args(),
+        ["show", "tell", "--project", "/Users/demo/code/atlas"]
+    );
+}
+
 #[derive(Default)]
 struct Fake {
     calls: RefCell<Vec<String>>,

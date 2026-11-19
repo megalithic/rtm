@@ -73,6 +73,7 @@ See `tests/fixtures/README.md` for fixture provenance.
 | ↑ ↓, ctrl+p ctrl+n | move |
 | ctrl+b ctrl+f | scroll the preview |
 | enter | go to the session, or focus the Ultimate tab on that conversation |
+| tab | Shade's tell mode on the row's project Ultimate: `--url` for an instance and its rows, `--project <main checkout>` for a Rex session |
 | ctrl+o | open or focus Tidewave Connect for the row's Phoenix app |
 | ctrl+t | new worktree (`rwt new`) from the row's repository, based on origin's default branch |
 | ctrl+shift+t | new worktree based on the highlighted row's branch (read from git for Ultimate rows) |

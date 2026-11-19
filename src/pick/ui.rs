@@ -869,6 +869,9 @@ impl Frame<'_> {
                     } else {
                         spans.extend([key("^b"), label("scroll")]);
                     }
+                    if self.app.tell_target().is_some() {
+                        spans.extend([key("tab"), label("tell")]);
+                    }
                     if app {
                         spans.extend([key("^o"), label("tidewave")]);
                     }

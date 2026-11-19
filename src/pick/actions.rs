@@ -245,6 +245,27 @@ pub fn jump(io: &dyn Io, client: Option<&str>, row: &Row) -> Result<()> {
     }
 }
 
+/// Opens Shade's tell mode on `target`. A Shade older than the `--url`/`--project` flags
+/// exits with usage (64); that gets its own line instead of the usage text's last one.
+pub fn tell(target: &crate::pick::state::Tell) -> Result<()> {
+    let output = Command::new("shade")
+        .args(target.args())
+        .stdin(Stdio::null())
+        .output()
+        .context("run shade")?;
+    match output.status.code() {
+        Some(0) => Ok(()),
+        Some(64) => bail!("this Shade has no tell --url/--project yet"),
+        _ => bail!(
+            "shade: {}",
+            first_error(
+                &String::from_utf8_lossy(&output.stdout),
+                &String::from_utf8_lossy(&output.stderr)
+            )
+        ),
+    }
+}
+
 /// `rwt down` stops a session's processes and keeps the worktree.
 pub fn kill_args(session: &str) -> Vec<String> {
     ["down", "--session", session, "--json"]

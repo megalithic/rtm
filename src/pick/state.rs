@@ -277,6 +277,24 @@ pub enum Note {
     Error(String),
 }
 
+/// Where Shade's tell mode sends a prompt: a running instance by URL, or a project by its
+/// main checkout (Shade finds its Ultimate, or says it is not running and keeps the draft).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Tell {
+    Url(String),
+    Project(String),
+}
+
+impl Tell {
+    pub fn args(&self) -> Vec<String> {
+        let (flag, value) = match self {
+            Tell::Url(url) => ("--url", url),
+            Tell::Project(path) => ("--project", path),
+        };
+        ["show", "tell", flag, value].map(str::to_owned).to_vec()
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum Command {
     None,
@@ -288,6 +306,7 @@ pub enum Command {
     },
     OpenUrl(String),
     Tidewave(String),
+    Tell(Tell),
     Kill {
         session: String,
         name: String,
@@ -499,6 +518,7 @@ impl App {
                 return Command::Quit;
             }
             KeyCode::Enter => return self.jump(),
+            KeyCode::Tab if key.modifiers.is_empty() => return self.tell(),
             KeyCode::Up => self.step(false),
             KeyCode::Down => self.step(true),
             _ if ctrl(&key, 'p') => self.step(false),
@@ -543,6 +563,33 @@ impl App {
         Command::Jump {
             row: Box::new(row.clone()),
             seen,
+        }
+    }
+
+    /// The project Ultimate a row belongs to: an instance and its sub-rows by URL, a Rex
+    /// session (or its agent) by the main checkout it is grouped under.
+    pub fn tell_target(&self) -> Option<Tell> {
+        let (row, parent) = self.current()?;
+        match &row.jump {
+            JumpTarget::Ultimate { url, .. } | JumpTarget::Inbox { url, .. } => {
+                Some(Tell::Url(url.clone()))
+            }
+            JumpTarget::Rex { .. } => row
+                .metadata
+                .repo
+                .clone()
+                .or_else(|| parent?.metadata.repo.clone())
+                .map(Tell::Project),
+        }
+    }
+
+    fn tell(&mut self) -> Command {
+        match self.tell_target() {
+            Some(target) => Command::Tell(target),
+            None => {
+                self.note = Some(Note::Info("no project here to tell".into()));
+                Command::None
+            }
         }
     }
 
