@@ -5,7 +5,7 @@ use rtm::{
     pick::{
         actions::{self, Io, Tab},
         parse_key,
-        state::{App, Command, ItemKind, Mode},
+        state::{self, App, Command, ItemKind, Mode},
     },
 };
 use std::cell::RefCell;
@@ -46,7 +46,10 @@ fn typed(app: &mut App, text: &str) {
 }
 
 fn selected_name(app: &App) -> String {
-    app.current().unwrap().0.name.clone()
+    match &app.selected_item().unwrap().kind {
+        ItemKind::Project { name, .. } => format!("[{name}]"),
+        _ => app.current().unwrap().0.name.clone(),
+    }
 }
 
 fn select_named(app: &mut App, name: &str) {
@@ -92,6 +95,72 @@ fn default_list_groups_attention_and_children() {
     );
     // The first selectable row is highlighted: the instance that needs you.
     assert_eq!(selected_name(&app), "atlas");
+}
+
+fn select_project(app: &mut App, name: &str) {
+    let index = app
+        .items
+        .iter()
+        .position(|item| matches!(&item.kind, ItemKind::Project { name: n, .. } if n == name))
+        .unwrap_or_else(|| panic!("no project {name}"));
+    app.select(index);
+}
+
+#[test]
+fn enter_on_a_project_header_goes_to_its_main_session_or_opens_one() {
+    // atlas' main checkout has its own session (atlas-main): Enter jumps there.
+    let mut app = App::new(model());
+    select_project(&mut app, "atlas");
+    assert_eq!(selected_name(&app), "[atlas]");
+    match app.key(key("enter")) {
+        Command::Jump { row, seen } => {
+            assert_eq!(row.name, "atlas-main");
+            assert_eq!(seen, [row.key.clone()]);
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(
+        app.tell_target().unwrap().args(),
+        ["show", "tell", "--project", "/Users/demo/code/atlas"]
+    );
+    // Without it (only another session in the main checkout, as one hosting an Ultimate,
+    // and worktree sessions), Enter opens the main checkout's own session.
+    let mut model = model();
+    for row in model.groups.iter_mut().flat_map(|group| &mut group.rows) {
+        if row.name == "atlas-main" {
+            row.name = "atlas ultimate".into();
+        }
+    }
+    let mut app = App::new(model);
+    select_project(&mut app, "atlas");
+    match app.key(key("enter")) {
+        Command::OpenMain { path, name } => {
+            assert_eq!(path, "/Users/demo/code/atlas");
+            assert_eq!(name, "atlas");
+        }
+        other => panic!("{other:?}"),
+    }
+    // rwt's labels for main checkouts, and the arguments for each kind of project.
+    assert_eq!(state::main_label("/Users/seth/.dotfiles"), "dotfiles-main");
+    assert_eq!(
+        state::main_label("/Users/seth/code/work/strive/provider_portal"),
+        "provider_portal-main"
+    );
+    assert_eq!(
+        actions::open_main_args("/p/provider_portal", true),
+        ["open", "/p/provider_portal", "--json", "--show"]
+    );
+    assert_eq!(
+        actions::open_main_args("/p/.dotfiles", false),
+        [
+            "open",
+            "/p/.dotfiles",
+            "--json",
+            "--show",
+            "--no-services",
+            "--no-agent"
+        ]
+    );
 }
 
 #[test]
@@ -305,7 +374,9 @@ fn tab_tells_the_rows_project_ultimate() {
             continue;
         }
         app.select(index);
-        let (row, parent) = app.current().unwrap();
+        let Some((row, parent)) = app.current() else {
+            continue;
+        };
         let owner = parent.unwrap_or(row);
         let expected = match owner.kind {
             Kind::Ultimate => Some(Tell::Url(owner.metadata.origin.clone().unwrap())),

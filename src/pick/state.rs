@@ -14,8 +14,10 @@ pub enum ItemKind {
     },
     Gap,
     /// A Rex project: its main checkout's name over the worktree sessions indented beneath it.
+    /// Selectable: Enter goes to (or opens) the main checkout's own session.
     Project {
         name: String,
+        path: String,
     },
     Row {
         group: usize,
@@ -59,7 +61,10 @@ impl Item {
     }
 
     pub fn selectable(&self) -> bool {
-        matches!(self.kind, ItemKind::Row { .. } | ItemKind::Child { .. })
+        matches!(
+            self.kind,
+            ItemKind::Row { .. } | ItemKind::Child { .. } | ItemKind::Project { .. }
+        )
     }
 }
 
@@ -128,6 +133,25 @@ pub fn project_of(row: &Row) -> Option<(String, String)> {
     Some((project.to_owned(), short))
 }
 
+/// rwt's label for a main checkout's own session: the directory name with anything but
+/// letters, digits and `_` as `-` (no squeezing), dashes trimmed from both ends, then `-main`.
+pub fn main_label(path: &str) -> String {
+    let name: String = path
+        .rsplit('/')
+        .next()
+        .unwrap_or(path)
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    format!("{}-main", name.trim_matches('-'))
+}
+
 /// Rex rows gather under their project's header, projects in the order their first (most
 /// pressing) row has, rows keeping theirs; rows without a project come last, unheaded.
 /// Projects are told apart by their main checkout's path; the header shows its name.
@@ -148,18 +172,20 @@ fn push_projects(items: &mut Vec<Item>, group: usize, rows: &[Row]) {
     if !loose.is_empty() {
         clusters.push((None, None, loose));
     }
-    for (cluster, (_, project, members)) in clusters.into_iter().enumerate() {
+    for (cluster, (path, project, members)) in clusters.into_iter().enumerate() {
         if cluster > 0 {
             items.push(Item::plain(
                 ItemKind::Gap,
                 format!("rest:{group}:{cluster}"),
             ));
         }
-        if let Some(name) = &project {
-            let first = &rows[members[0]];
+        if let (Some(name), Some(path)) = (&project, path) {
             items.push(Item::plain(
-                ItemKind::Project { name: name.clone() },
-                format!("project:{name}/{}", first.key),
+                ItemKind::Project {
+                    name: name.clone(),
+                    path: path.clone(),
+                },
+                format!("project:{path}"),
             ));
         }
         for index in members {
@@ -315,6 +341,11 @@ pub enum Command {
         path: String,
         name: String,
         base: Option<String>,
+    },
+    /// `rwt open` on a project's main checkout, which has no session of its own yet.
+    OpenMain {
+        path: String,
+        name: String,
     },
 }
 
@@ -550,7 +581,42 @@ impl App {
         Command::None
     }
 
-    fn jump(&self) -> Command {
+    /// What Enter on a project header does: go to the main checkout's own session (the one
+    /// `rwt open` makes and reuses), or open one. Other sessions there, such as one hosting
+    /// an Ultimate, are not it and stay untouched.
+    pub fn project_command(&self, name: &str, path: &str) -> Command {
+        let label = main_label(path);
+        let own = self
+            .model
+            .groups
+            .iter()
+            .flat_map(|group| &group.rows)
+            .find(|row| {
+                matches!(row.jump, JumpTarget::Rex { .. })
+                    && row.metadata.worktree.as_deref() == Some(path)
+                    && row.name == label
+            });
+        match own {
+            Some(row) => Command::Jump {
+                row: Box::new(row.clone()),
+                seen: vec![row.key.clone()],
+            },
+            None => Command::OpenMain {
+                path: path.to_owned(),
+                name: name.to_owned(),
+            },
+        }
+    }
+
+    fn jump(&mut self) -> Command {
+        if let Some(ItemKind::Project { name, path }) = self.selected_item().map(|i| i.kind.clone())
+        {
+            let command = self.project_command(&name, &path);
+            if matches!(command, Command::OpenMain { .. }) {
+                self.note = Some(Note::Info(format!("opening {name}…")));
+            }
+            return command;
+        }
         let Some((row, parent)) = self.current() else {
             return Command::None;
         };
@@ -569,6 +635,9 @@ impl App {
     /// The project Ultimate a row belongs to: an instance and its sub-rows by URL, a Rex
     /// session (or its agent) by the main checkout it is grouped under.
     pub fn tell_target(&self) -> Option<Tell> {
+        if let ItemKind::Project { path, .. } = &self.selected_item()?.kind {
+            return Some(Tell::Project(path.clone()));
+        }
         let (row, parent) = self.current()?;
         match &row.jump {
             JumpTarget::Ultimate { url, .. } | JumpTarget::Inbox { url, .. } => {

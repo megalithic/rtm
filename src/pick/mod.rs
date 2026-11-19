@@ -51,6 +51,7 @@ enum Message {
     Input(Event),
     Model(Box<Model>),
     Created(Result<(), String>),
+    Opened(Result<(), String>),
     Killed(String, Result<(), String>),
     Wake,
 }
@@ -418,6 +419,17 @@ impl Loop {
                 });
                 false
             }
+            // Setup can take minutes: rwt runs it in the new session's own tab, and the
+            // picker closes once rwt has shown the session.
+            Command::OpenMain { path, .. } => {
+                let tx = self.tx.clone();
+                thread::spawn(move || {
+                    let result = actions::open_main(&actions::System, &path)
+                        .map_err(|error| format!("{error:#}"));
+                    let _ = tx.send(Message::Opened(result));
+                });
+                false
+            }
             Command::Create { path, name, base } => {
                 let tx = self.tx.clone();
                 thread::spawn(move || {
@@ -623,6 +635,11 @@ pub fn run(options: Options) -> Result<()> {
                     if ok {
                         return Ok(());
                     }
+                    Command::None
+                }
+                Message::Opened(Ok(())) => return Ok(()),
+                Message::Opened(Err(error)) => {
+                    looper.app.note = Some(Note::Error(error));
                     Command::None
                 }
                 Message::Killed(name, result) => {

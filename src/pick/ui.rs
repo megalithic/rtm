@@ -2,7 +2,7 @@
 //! edges, the highlight a pill. Hierarchy comes from weight, dimness and spacing, not boxes.
 use super::{
     motion,
-    state::{App, Item, ItemKind, Mode, Note},
+    state::{self, App, Command, Item, ItemKind, Mode, Note},
     theme::{self, AQUA, BLUE, CARD, FAINT, GREEN, PAGE, PURPLE, RAISED, RED, YELLOW},
 };
 use crate::{
@@ -561,7 +561,8 @@ impl Frame<'_> {
                 put(self.buf, x, r.y, &Line::from(spans), w);
             }
             ItemKind::Gap => {}
-            ItemKind::Project { ref name } => {
+            ItemKind::Project { ref name, .. } => {
+                self.view.hits.push((r, Hit::Item(index)));
                 put(
                     self.buf,
                     x + 2,
@@ -671,6 +672,11 @@ impl Frame<'_> {
         );
         let Some((row, parent)) = self.app.current() else {
             self.view.content = Rect::default();
+            if let Some(ItemKind::Project { name, path }) =
+                self.app.selected_item().map(|item| &item.kind)
+            {
+                self.project_preview(inner, name, path);
+            }
             return;
         };
         // Header: who and where, available at once from the model.
@@ -811,6 +817,45 @@ impl Frame<'_> {
         }
     }
 
+    /// A project header: its main checkout, and what Enter does there.
+    fn project_preview(&mut self, inner: Rect, name: &str, path: &str) {
+        put(
+            self.buf,
+            inner.x,
+            inner.y,
+            &Line::styled(name.to_owned(), theme::text().add_modifier(Modifier::BOLD)),
+            inner.width,
+        );
+        let home = dirs::home_dir().map(|home| home.to_string_lossy().into_owned());
+        let shown = match &home {
+            Some(home) if path.starts_with(home.as_str()) => format!("~{}", &path[home.len()..]),
+            _ => path.to_owned(),
+        };
+        put(
+            self.buf,
+            inner.x + 2,
+            inner.y + 1,
+            &Line::styled(format!("main checkout  ·  {shown}"), theme::faint()),
+            inner.width.saturating_sub(2),
+        );
+        let lines = match self.app.project_command(name, path) {
+            Command::Jump { row, .. } => vec![format!("↵ goes to its session {}", row.name)],
+            _ => vec![
+                format!("↵ opens session {} with rwt open", state::main_label(path)),
+                "setup, services and agent with a dev setup; one tab without".into(),
+            ],
+        };
+        for (offset, line) in lines.into_iter().enumerate() {
+            put(
+                self.buf,
+                inner.x,
+                inner.y + 3 + offset as u16,
+                &Line::styled(line, theme::muted()),
+                inner.width,
+            );
+        }
+    }
+
     fn footer(&mut self, r: Rect) {
         let key = |k: &str| Span::styled(k.to_owned(), theme::muted());
         let label = |l: &str| Span::styled(format!(" {l}     "), theme::faint());
@@ -857,9 +902,23 @@ impl Frame<'_> {
                     .app
                     .current()
                     .is_some_and(|(row, _)| row.kind == Kind::Inbox);
-                let mut spans = vec![key("↵"), label(if inbox { "open inbox" } else { "go" })];
+                let project = match self.app.selected_item().map(|item| &item.kind) {
+                    Some(ItemKind::Project { name, path }) => Some(matches!(
+                        self.app.project_command(name, path),
+                        Command::Jump { .. }
+                    )),
+                    _ => None,
+                };
+                let go = match project {
+                    Some(false) => "open session",
+                    _ if inbox => "open inbox",
+                    _ => "go",
+                };
+                let mut spans = vec![key("↵"), label(go)];
                 if !self.app.query.is_empty() {
                     spans.extend([key("esc"), label("clear")]);
+                } else if project.is_some() {
+                    spans.extend([key("tab"), label("tell"), key("esc"), label("close")]);
                 } else if let Some((row, parent)) = self.app.current() {
                     let rex = matches!(row.kind, Kind::Rex | Kind::Agent);
                     let app = !row.metadata.apps.is_empty()

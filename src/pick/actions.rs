@@ -321,6 +321,40 @@ pub fn create_args(name: &str, base: Option<&str>) -> Vec<String> {
     args
 }
 
+/// `rwt open` on a main checkout: setup, services on the project's own port and the agent
+/// tab when the project has a dev setup; otherwise one plain tab.
+pub fn open_main_args(path: &str, dev: bool) -> Vec<String> {
+    let mut args: Vec<String> = ["open", path, "--json", "--show"]
+        .map(str::to_owned)
+        .to_vec();
+    if !dev {
+        args.extend(["--no-services".into(), "--no-agent".into()]);
+    }
+    args
+}
+
+fn mise_bin() -> String {
+    dirs::home_dir()
+        .map(|home| home.join(".local/bin/mise"))
+        .filter(|path| path.is_file())
+        .map_or_else(|| "mise".into(), |path| path.to_string_lossy().into_owned())
+}
+
+/// A dev setup is what rwt runs: the project's `dev:setup` or `dev:services` mise task.
+pub fn has_dev_setup(io: &dyn Io, path: &str) -> bool {
+    let mise = mise_bin();
+    ["dev:setup", "dev:services"]
+        .iter()
+        .any(|task| io.run(&mise, &["tasks", "info", task], Some(path)).is_ok())
+}
+
+pub fn open_main(io: &dyn Io, path: &str) -> Result<()> {
+    let args = open_main_args(path, has_dev_setup(io, path));
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    io.run(&rwt_bin(), &args, Some(path))?;
+    Ok(())
+}
+
 pub fn create(io: &dyn Io, repo: &str, name: &str, base: Option<&str>) -> Result<()> {
     let args = create_args(name, base);
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
