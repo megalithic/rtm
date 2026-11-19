@@ -198,14 +198,16 @@ fn record_details(blocks: &[&Block]) -> Vec<String> {
         .collect()
 }
 
+// The title says what the conversation is about; Ultimate's label is only its agent kind
+// ("coordinator", "reviewer"), shared by many rows.
 fn conversation_name(conversation: &Conversation) -> String {
     if conversation.id == 1 {
         "@ultimate".into()
     } else {
         conversation
-            .label
+            .title
             .as_ref()
-            .or(conversation.title.as_ref())
+            .or(conversation.label.as_ref())
             .cloned()
             .unwrap_or_else(|| format!("#{}", conversation.id))
     }

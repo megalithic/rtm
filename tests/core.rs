@@ -110,7 +110,7 @@ fn ultimate_children_attention_recency_seen_and_root_name() {
             .map(|child| child.name.as_str())
             .collect::<Vec<_>>(),
         // Idle conversations ("Recent review", "@ultimate") fold into "+2 more".
-        ["migration", "Background worker"]
+        ["Database indexes", "Background worker"]
     );
     assert_eq!(row.metadata.hidden, 2);
     assert!(row.children[0].attention);
@@ -229,7 +229,7 @@ fn search_tiers_child_hits_and_highlight_indices() {
     assert_eq!(hits[1].group, 0);
     assert_eq!(hits[1].children.len(), 1);
     let child = &model.groups[hits[1].group].rows[hits[1].row].children[hits[1].children[0].child];
-    assert_eq!(child.name, "migration");
+    assert_eq!(child.name, "Database indexes");
     let found = &hits[1].children[0].matches[0];
     let matched: String = found
         .indices
@@ -373,7 +373,7 @@ fn ultimate_subrows_keep_recent_two_hours_and_at_most_five() {
     assert_eq!(row.children.len(), 5);
     assert_eq!(row.metadata.agent_count, 14);
     assert_eq!(row.metadata.hidden, 9);
-    assert_eq!(row.children[0].name, "migration"); // Attention survives the cut.
+    assert_eq!(row.children[0].name, "Database indexes"); // Attention survives the cut.
 }
 
 #[test]

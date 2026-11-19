@@ -100,10 +100,10 @@ fn ctrl_n_p_and_arrows_skip_headers_and_stop_at_ends() {
     app.key(key("ctrl+p"));
     assert_eq!(selected_name(&app), "atlas");
     app.key(key("ctrl+n"));
-    assert_eq!(selected_name(&app), "migration");
+    assert_eq!(selected_name(&app), "Database indexes");
     app.key(key("down"));
     app.key(key("up"));
-    assert_eq!(selected_name(&app), "migration");
+    assert_eq!(selected_name(&app), "Database indexes");
     for _ in 0..50 {
         app.key(key("down"));
     }
@@ -125,7 +125,10 @@ fn typing_searches_and_esc_clears_before_closing() {
         .position(|item| matches!(item.kind, ItemKind::Child { .. }))
         .unwrap();
     assert!(matches!(app.items[child - 1].kind, ItemKind::Row { .. }));
-    assert_eq!(app.row(&app.items[child]).unwrap().0.name, "migration");
+    assert_eq!(
+        app.row(&app.items[child]).unwrap().0.name,
+        "Database indexes"
+    );
     app.key(key("backspace"));
     assert_eq!(app.query, "indexe");
     assert!(matches!(app.key(key("esc")), Command::None));
@@ -143,7 +146,7 @@ fn enter_jumps_and_marks_the_row_and_its_parent_seen() {
     app.key(key("ctrl+n"));
     match app.key(key("enter")) {
         Command::Jump { row, seen } => {
-            assert_eq!(row.name, "migration");
+            assert_eq!(row.name, "Database indexes");
             assert_eq!(
                 seen,
                 ["ult:/Users/demo/code/atlas#2", "ult:/Users/demo/code/atlas"]
@@ -598,8 +601,8 @@ fn ctrl_shift_t_on_an_ultimate_row_reads_the_branch_from_its_checkout() {
     }
     let mut app = App::new(model());
     app.branch_of = fake_branch;
-    // "migration" is a conversation whose cwd is the db worktree; it has no branch metadata.
-    select_named(&mut app, "migration");
+    // "Database indexes" is a conversation whose cwd is the db worktree; it has no branch metadata.
+    select_named(&mut app, "Database indexes");
     assert!(app.current().unwrap().0.metadata.branch.is_none());
     app.key(key("ctrl+shift+t"));
     assert!(
