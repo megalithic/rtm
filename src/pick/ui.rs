@@ -212,7 +212,7 @@ fn name_spans(row: &Row, hits: &[u32], selected: bool, short: Option<&str>) -> V
 }
 
 /// The port column's width (`:4002`), kept even when a row has none so PRs and ports align.
-const PORT_WIDTH: usize = 5;
+const PORT_WIDTH: usize = 6;
 
 /// Quiet right-hand metadata in columns: branch (when not already in the name), PR, port, age.
 fn meta(row: &Row, now: u64) -> (Vec<Span<'static>>, Option<(String, usize, usize)>) {
@@ -485,7 +485,11 @@ impl Frame<'_> {
         let margin = 2.min(height / 4);
         if selected < self.view.offset + margin {
             self.view.offset = selected.saturating_sub(margin);
-            while self.view.offset > 0 && !items[self.view.offset - 1].selectable() {
+            // Headers above come into view too, as long as the highlight stays on screen.
+            while self.view.offset > 0
+                && !items[self.view.offset - 1].selectable()
+                && selected < self.view.offset - 1 + height
+            {
                 self.view.offset -= 1;
                 if matches!(items[self.view.offset].kind, ItemKind::Header { .. }) {
                     break;

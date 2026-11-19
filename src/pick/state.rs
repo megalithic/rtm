@@ -129,17 +129,26 @@ pub fn project_of(row: &Row) -> Option<(String, String)> {
 }
 
 /// Rex rows gather under their project's header, projects in the order their first (most
-/// pressing) row has, rows keeping theirs; rows without a project come together, unheaded.
+/// pressing) row has, rows keeping theirs; rows without a project come last, unheaded.
+/// Projects are told apart by their main checkout's path; the header shows its name.
 fn push_projects(items: &mut Vec<Item>, group: usize, rows: &[Row]) {
-    let mut clusters: Vec<(Option<String>, Vec<usize>)> = Vec::new();
+    let mut clusters: Vec<(Option<String>, Option<String>, Vec<usize>)> = Vec::new();
+    let mut loose = Vec::new();
     for (index, row) in rows.iter().enumerate() {
-        let project = project_of(row).map(|(project, _)| project);
-        match clusters.iter_mut().find(|(name, _)| *name == project) {
-            Some((_, members)) => members.push(index),
-            None => clusters.push((project, vec![index])),
+        let Some((project, _)) = project_of(row) else {
+            loose.push(index);
+            continue;
+        };
+        let repo = row.metadata.repo.clone();
+        match clusters.iter_mut().find(|(path, _, _)| *path == repo) {
+            Some((_, _, members)) => members.push(index),
+            None => clusters.push((repo, Some(project), vec![index])),
         }
     }
-    for (cluster, (project, members)) in clusters.into_iter().enumerate() {
+    if !loose.is_empty() {
+        clusters.push((None, None, loose));
+    }
+    for (cluster, (_, project, members)) in clusters.into_iter().enumerate() {
         if cluster > 0 {
             items.push(Item::plain(
                 ItemKind::Gap,

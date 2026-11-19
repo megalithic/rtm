@@ -428,7 +428,7 @@ fn rex_sessions_group_under_their_project_with_ports_in_one_column() {
     use rtm::pick::ui;
     use std::time::Instant;
     let mut model = model();
-    // A second PR-less, port-less worktree, and a PR without a port: the cases that misaligned.
+    // A PR without a port, and a five-digit port: the cases that misaligned.
     let rex = model
         .groups
         .iter_mut()
@@ -443,7 +443,16 @@ fn rex_sessions_group_under_their_project_with_ports_in_one_column() {
     docs.key = "rex:docs".into();
     docs.name = "atlas-docs".into();
     docs.metadata.apps.clear();
+    let mut wide = docs.clone();
+    wide.key = "rex:wide".into();
+    wide.name = "atlas-wide".into();
+    wide.metadata.pr = None;
+    wide.metadata.apps = vec![rtm::model::Endpoint {
+        port: 10000,
+        origin: None,
+    }];
     rex.rows.push(docs);
+    rex.rows.push(wide);
     let app = App::new(model);
     let area = Rect::new(0, 0, 70, 30);
     let mut buf = Buffer::empty(area);
@@ -490,6 +499,11 @@ fn rex_sessions_group_under_their_project_with_ports_in_one_column() {
         |line: &str, token: &str| line[..line.find(token).unwrap()].chars().count() + token.len();
     let main = line(":4000");
     assert_eq!(end(&search, ":4001"), end(&main, ":4000"), "{screen}");
+    assert_eq!(
+        end(&line(" wide "), ":10000"),
+        end(&main, ":4000"),
+        "{screen}"
+    );
     assert!(end(&search, "#42") < end(&search, ":4001"), "{screen}");
     assert_eq!(end(&line(" docs "), "#42"), end(&search, "#42"), "{screen}");
 }
