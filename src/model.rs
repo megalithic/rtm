@@ -57,6 +57,8 @@ pub struct Metadata {
     pub port: Option<u16>,
     pub origin: Option<String>,
     pub hub: Option<String>,
+    /// A Rex session's main checkout: the project the picker groups its worktrees under.
+    pub repo: Option<String>,
     pub branch: Option<String>,
     pub worktree: Option<String>,
     pub pr: Option<Pr>,
@@ -586,6 +588,7 @@ pub fn build(inputs: &Inputs<'_>) -> Model {
                 .max()
                 .unwrap_or_default(),
             metadata: Metadata {
+                repo: tree.map(|tree| tree.repo.clone()),
                 branch: tree.map(|tree| tree.branch.clone()),
                 worktree: tree.map(|tree| tree.path.clone()),
                 pr,

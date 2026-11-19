@@ -1,7 +1,7 @@
 //! The picker's pure state: what is listed, what is selected, and what a key asks for.
 //! No terminal, process or network access, so every key path is testable.
 use crate::{
-    model::{JumpTarget, Model, Row},
+    model::{JumpTarget, Kind, Model, Row},
     search,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -13,6 +13,10 @@ pub enum ItemKind {
         attention: usize,
     },
     Gap,
+    /// A Rex project: its main checkout's name over the worktree sessions indented beneath it.
+    Project {
+        name: String,
+    },
     Row {
         group: usize,
         row: usize,
@@ -37,6 +41,9 @@ pub struct Item {
     pub hits: Vec<u32>,
     /// When the match is not in the name: the text that matched and its offsets.
     pub detail: Option<(String, Vec<u32>)>,
+    /// Under a project header: the row's name without the project, and its items step in.
+    pub short: Option<String>,
+    pub nested: bool,
 }
 
 impl Item {
@@ -46,6 +53,8 @@ impl Item {
             key,
             hits: Vec::new(),
             detail: None,
+            short: None,
+            nested: false,
         }
     }
 
@@ -54,7 +63,8 @@ impl Item {
     }
 }
 
-fn push_row(items: &mut Vec<Item>, group: usize, index: usize, row: &Row) {
+fn push_row(items: &mut Vec<Item>, group: usize, index: usize, row: &Row, short: Option<String>) {
+    let start = items.len();
     items.push(Item::plain(
         ItemKind::Row { group, row: index },
         row.key.clone(),
@@ -78,6 +88,78 @@ fn push_row(items: &mut Vec<Item>, group: usize, index: usize, row: &Row) {
             },
             format!("{}/more", row.key),
         ));
+    }
+    if short.is_some() {
+        for item in &mut items[start..] {
+            item.nested = true;
+        }
+        items[start].short = short;
+    }
+}
+
+/// rwt's label slug: anything but letters, digits and `_` becomes one `-`, trimmed.
+fn slug(text: &str) -> String {
+    let mut out = String::new();
+    for c in text.chars() {
+        if c.is_ascii_alphanumeric() || c == '_' {
+            out.push(c);
+        } else if !out.ends_with('-') {
+            out.push('-');
+        }
+    }
+    out.trim_matches('-').to_owned()
+}
+
+/// A Rex row's project (its main checkout's name) and the name to show under it: the
+/// session label without the `<project>-` (or `<project> `) prefix rwt gives it.
+pub fn project_of(row: &Row) -> Option<(String, String)> {
+    let repo = row.metadata.repo.as_deref()?;
+    let project = repo.rsplit('/').next().filter(|name| !name.is_empty())?;
+    let short = [project.to_owned(), slug(project)]
+        .iter()
+        .flat_map(|prefix| [format!("{prefix}-"), format!("{prefix} ")])
+        .find_map(|prefix| {
+            row.name
+                .strip_prefix(prefix.as_str())
+                .filter(|rest| !rest.is_empty())
+        })
+        .unwrap_or(&row.name)
+        .to_owned();
+    Some((project.to_owned(), short))
+}
+
+/// Rex rows gather under their project's header, projects in the order their first (most
+/// pressing) row has, rows keeping theirs; rows without a project come together, unheaded.
+fn push_projects(items: &mut Vec<Item>, group: usize, rows: &[Row]) {
+    let mut clusters: Vec<(Option<String>, Vec<usize>)> = Vec::new();
+    for (index, row) in rows.iter().enumerate() {
+        let project = project_of(row).map(|(project, _)| project);
+        match clusters.iter_mut().find(|(name, _)| *name == project) {
+            Some((_, members)) => members.push(index),
+            None => clusters.push((project, vec![index])),
+        }
+    }
+    for (cluster, (project, members)) in clusters.into_iter().enumerate() {
+        if cluster > 0 {
+            items.push(Item::plain(
+                ItemKind::Gap,
+                format!("rest:{group}:{cluster}"),
+            ));
+        }
+        if let Some(name) = &project {
+            let first = &rows[members[0]];
+            items.push(Item::plain(
+                ItemKind::Project { name: name.clone() },
+                format!("project:{name}/{}", first.key),
+            ));
+        }
+        for index in members {
+            let short = project
+                .as_ref()
+                .and_then(|_| project_of(&rows[index]))
+                .map(|(_, short)| short);
+            push_row(items, group, index, &rows[index], short);
+        }
     }
 }
 
@@ -113,11 +195,15 @@ pub fn items(model: &Model, query: &str) -> Vec<Item> {
                 ItemKind::Header { group, attention },
                 format!("group:{group}"),
             ));
+            if rows.kind == Kind::Rex {
+                push_projects(&mut items, group, &rows.rows);
+                continue;
+            }
             for (index, row) in rows.rows.iter().enumerate() {
                 if index > 0 && rows.rows[index - 1].attention && !row.attention {
                     items.push(Item::plain(ItemKind::Gap, format!("rest:{group}")));
                 }
-                push_row(&mut items, group, index, row);
+                push_row(&mut items, group, index, row, None);
             }
         }
         return items;
@@ -133,6 +219,8 @@ pub fn items(model: &Model, query: &str) -> Vec<Item> {
             key: row.key.clone(),
             hits,
             detail,
+            short: None,
+            nested: false,
         });
         for found in &hit.children {
             let (hits, detail) = split(&found.matches);
@@ -145,6 +233,8 @@ pub fn items(model: &Model, query: &str) -> Vec<Item> {
                 key: row.children[found.child].key.clone(),
                 hits,
                 detail,
+                short: None,
+                nested: false,
             });
         }
     }

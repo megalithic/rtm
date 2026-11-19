@@ -423,6 +423,78 @@ fn a_stuck_capture_is_killed_after_its_limit() {
 }
 
 #[test]
+fn rex_sessions_group_under_their_project_with_ports_in_one_column() {
+    use ratatui::{buffer::Buffer, layout::Rect};
+    use rtm::pick::ui;
+    use std::time::Instant;
+    let mut model = model();
+    // A second PR-less, port-less worktree, and a PR without a port: the cases that misaligned.
+    let rex = model
+        .groups
+        .iter_mut()
+        .find(|group| group.rows.iter().any(|row| row.name == "atlas-search"))
+        .unwrap();
+    let mut docs = rex
+        .rows
+        .iter()
+        .find(|row| row.name == "atlas-search")
+        .unwrap()
+        .clone();
+    docs.key = "rex:docs".into();
+    docs.name = "atlas-docs".into();
+    docs.metadata.apps.clear();
+    rex.rows.push(docs);
+    let app = App::new(model);
+    let area = Rect::new(0, 0, 70, 30);
+    let mut buf = Buffer::empty(area);
+    ui::draw(
+        &mut buf,
+        &app,
+        &mut ui::View::default(),
+        Instant::now(),
+        1_794_925_000_000,
+    );
+    let lines: Vec<String> = (0..30)
+        .map(|y| (0..70).map(|x| buf[(x, y)].symbol().to_owned()).collect())
+        .collect();
+    let screen = lines.join("\n");
+    let rex = lines
+        .iter()
+        .position(|line| line.trim().starts_with("Rex"))
+        .unwrap();
+    let lines = &lines[rex..];
+    let line = |needle: &str| {
+        lines
+            .iter()
+            .find(|line| line.contains(needle))
+            .unwrap_or_else(|| panic!("no {needle} in\n{screen}"))
+            .clone()
+    };
+    // One header per project; its sessions beneath it without the `atlas-` prefix.
+    assert_eq!(
+        lines.iter().filter(|line| line.trim() == "atlas").count(),
+        1,
+        "{screen}"
+    );
+    assert!(
+        !screen.contains("atlas-search") && !screen.contains("atlas-docs"),
+        "{screen}"
+    );
+    let header = line("atlas").find("atlas").unwrap();
+    let search = line(" search ");
+    assert!(search.find("search").unwrap() > header, "{screen}");
+    // PR first, then the port: every port ends in one column, and a PR without a port
+    // stays in the PR column.
+    // Columns, not bytes: the status glyphs differ in UTF-8 length.
+    let end =
+        |line: &str, token: &str| line[..line.find(token).unwrap()].chars().count() + token.len();
+    let main = line(":4000");
+    assert_eq!(end(&search, ":4001"), end(&main, ":4000"), "{screen}");
+    assert!(end(&search, "#42") < end(&search, ":4001"), "{screen}");
+    assert_eq!(end(&line(" docs "), "#42"), end(&search, "#42"), "{screen}");
+}
+
+#[test]
 fn tiny_buffers_render_without_panicking() {
     use ratatui::{buffer::Buffer, layout::Rect};
     use rtm::pick::{draw_kill, ui};

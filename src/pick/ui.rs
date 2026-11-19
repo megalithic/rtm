@@ -186,13 +186,17 @@ fn repo_of(row: &Row) -> Option<String> {
     Some(main.rsplit('/').next()?.to_owned())
 }
 
-/// Name spans: a Rex worktree's repo prefix steps back so the distinct part reads first.
-fn name_spans(row: &Row, hits: &[u32], selected: bool) -> Vec<Span<'static>> {
+/// Name spans: a Rex worktree's repo prefix steps back so the distinct part reads first;
+/// under a project header only the distinct part shows.
+fn name_spans(row: &Row, hits: &[u32], selected: bool, short: Option<&str>) -> Vec<Span<'static>> {
     let strong = if selected {
         theme::text().add_modifier(Modifier::BOLD)
     } else {
         theme::text()
     };
+    if let Some(short) = short {
+        return vec![Span::styled(short.to_owned(), strong)];
+    }
     let prefix = (row.kind == Kind::Rex)
         .then(|| repo_of(row))
         .flatten()
@@ -207,7 +211,10 @@ fn name_spans(row: &Row, hits: &[u32], selected: bool) -> Vec<Span<'static>> {
     }
 }
 
-/// Quiet right-hand metadata: branch (when not already in the name), port, PR, age.
+/// The port column's width (`:4002`), kept even when a row has none so PRs and ports align.
+const PORT_WIDTH: usize = 5;
+
+/// Quiet right-hand metadata in columns: branch (when not already in the name), PR, port, age.
 fn meta(row: &Row, now: u64) -> (Vec<Span<'static>>, Option<(String, usize, usize)>) {
     let mut spans: Vec<Span<'static>> = Vec::new();
     let gap = |spans: &mut Vec<Span<'static>>| {
@@ -223,16 +230,6 @@ fn meta(row: &Row, now: u64) -> (Vec<Span<'static>>, Option<(String, usize, usiz
         gap(&mut spans);
         spans.push(Span::styled(format!("⎇ {branch}"), theme::faint()));
     }
-    for app in &row.metadata.apps {
-        gap(&mut spans);
-        spans.push(Span::styled(format!(":{}", app.port), theme::muted()));
-    }
-    if row.kind == Kind::Ultimate
-        && let Some(port) = row.metadata.port
-    {
-        gap(&mut spans);
-        spans.push(Span::styled(format!(":{port}"), theme::faint()));
-    }
     let mut pr_at = None;
     if let Some(pr) = &row.metadata.pr {
         gap(&mut spans);
@@ -245,6 +242,32 @@ fn meta(row: &Row, now: u64) -> (Vec<Span<'static>>, Option<(String, usize, usiz
         let start: usize = spans.iter().map(|span| span.width()).sum();
         pr_at = Some((pr.url.clone(), start, label.width()));
         spans.push(Span::styled(label, Style::new().fg(colour)));
+    }
+    let ports: Vec<Span<'static>> = if row.kind == Kind::Ultimate {
+        row.metadata
+            .port
+            .map(|port| Span::styled(format!(":{port}"), theme::faint()))
+            .into_iter()
+            .collect()
+    } else {
+        row.metadata
+            .apps
+            .iter()
+            .map(|app| Span::styled(format!(":{}", app.port), theme::muted()))
+            .collect()
+    };
+    if ports.is_empty() {
+        if !spans.is_empty() {
+            spans.push(Span::raw(" ".repeat(PORT_WIDTH + 2)));
+        }
+    } else {
+        for port in ports {
+            gap(&mut spans);
+            spans.push(Span::styled(
+                format!("{:>PORT_WIDTH$}", port.content),
+                port.style,
+            ));
+        }
     }
     let when = age(now, row.last_activity);
     gap(&mut spans);
@@ -533,6 +556,15 @@ impl Frame<'_> {
                 put(self.buf, x, r.y, &Line::from(spans), w);
             }
             ItemKind::Gap => {}
+            ItemKind::Project { ref name } => {
+                put(
+                    self.buf,
+                    x + 2,
+                    r.y,
+                    &Line::styled(name.clone(), theme::text().add_modifier(Modifier::BOLD)),
+                    w.saturating_sub(2),
+                );
+            }
             ItemKind::More { count, .. } => {
                 put(
                     self.buf,
@@ -554,7 +586,7 @@ impl Frame<'_> {
                     ""
                 };
                 let (glyph, colour, word) = status(row, spinner);
-                let indent = if child { 3 } else { 0 };
+                let indent = if child { 3 } else { 0 } + if item.nested { 2 } else { 0 };
                 let mut left = vec![Span::styled(glyph, Style::new().fg(colour)), Span::raw(" ")];
                 if child {
                     let base = if selected {
@@ -576,7 +608,7 @@ impl Frame<'_> {
                         ));
                     }
                 } else {
-                    left.extend(name_spans(row, &item.hits, selected));
+                    left.extend(name_spans(row, &item.hits, selected, item.short.as_deref()));
                 }
                 if let Some(word) = word {
                     left.push(Span::styled(format!("  {word}"), Style::new().fg(colour)));
