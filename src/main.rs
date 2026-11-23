@@ -1,9 +1,10 @@
 use anyhow::{Context, Result, bail};
-use rtm::{model::Row, pick, seen, snapshot};
+use rtm::{model::Row, needs, pick, seen, snapshot, ultimate};
 
 const USAGE: &str = "rtm pick [<client_id> [<block_id>]] [--bench-first-frame]
 rtm kill <session_id> [<client_id>]
 rtm snapshot [--json] [--wait] [--timing]
+rtm needs [--json]
 rtm seen <rex session id>";
 use std::{
     io::{self, Write},
@@ -57,6 +58,33 @@ fn run() -> Result<()> {
             if args.iter().any(|arg| arg == "--timing") {
                 for (source, ms) in &snapshot.timings_ms {
                     eprintln!("{source}: {ms:.2} ms");
+                }
+            }
+        }
+        Some("needs") => {
+            if args[1..].iter().any(|arg| arg != "--json") {
+                bail!("unknown needs option");
+            }
+            let needs = needs::load(&ultimate::user_home()?)?;
+            let mut out = io::stdout().lock();
+            if args.len() > 1 {
+                serde_json::to_writer(&mut out, &needs)?;
+                writeln!(out)?;
+            } else {
+                writeln!(out, "{} waiting", needs.total)?;
+                for hub in &needs.hubs {
+                    match (&hub.count, &hub.error) {
+                        (Some(count), _) => {
+                            writeln!(out, "  {}  {}  {count}", hub.host, hub.project)?
+                        }
+                        (None, error) => writeln!(
+                            out,
+                            "  {}  {}  unreachable: {}",
+                            hub.host,
+                            hub.project,
+                            error.as_deref().unwrap_or_default()
+                        )?,
+                    }
                 }
             }
         }

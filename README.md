@@ -23,7 +23,14 @@ the Ultimate instance's tabs to the conversation and raise its Helium tab over C
 rtm snapshot --json --timing          # live Rex + Ultimate; cached registry and PRs
 rtm snapshot --json --wait --timing   # also wait for cache refresh
 rtm seen 'session:<id>'               # fast, atomic last-viewed update; no discovery
+rtm needs [--json]                    # what waits on you, per hub: this Mac's instances and `remotes`
 ```
+
+`rtm needs` counts each hub's Inbox exactly as the picker's Inbox row does (open questions to
+the user plus open Inbox items), for this Mac's running instances and every other host's URL in
+`remotes` of `~/.ultimate/settings.json`. A hub that doesn't answer (1 s local, 3 s remote) has
+`count: null` and its `error`, never 0; `total` sums the hubs that answered. The menu bar app
+and Rex trackers read it.
 
 Rex is read through the embedded `src/rex/snapshot.lua` with autostart disabled. Ultimate
 lockfiles are checked with signal 0; only the status, conversations and entries read actions

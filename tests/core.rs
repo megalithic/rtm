@@ -500,3 +500,35 @@ fn inbox_row_leads_subrows_and_only_questions_need_you() {
             .all(|row| row.kind != Kind::Inbox)
     );
 }
+
+#[test]
+fn needs_reads_other_hosts_remotes_and_an_unreachable_hub_has_no_count() {
+    use rtm::needs;
+    let settings = json!({"remotes": {
+        "workbookpro": {".dotfiles": "https://workbookpro.ts.net:4749"},
+        "megabookpro": {".dotfiles": "https://megabookpro.ts.net:4749", "odd": 3}
+    }});
+    assert_eq!(
+        needs::remotes(&settings, "WorkbookPro"),
+        [(
+            "megabookpro".into(),
+            ".dotfiles".into(),
+            "https://megabookpro.ts.net:4749".into()
+        )]
+    );
+    assert!(needs::remotes(&json!({}), "x").is_empty());
+    // Port 9 (discard) refuses at once: an error and no count, never 0.
+    let home = std::env::temp_dir().join(format!("rtm-needs-{}", std::process::id()));
+    std::fs::create_dir_all(home.join("projects")).unwrap();
+    std::fs::write(
+        home.join("settings.json"),
+        json!({"remotes": {"elsewhere": {"p": "http://127.0.0.1:9"}}}).to_string(),
+    )
+    .unwrap();
+    let result = needs::load(&home).unwrap();
+    std::fs::remove_dir_all(&home).unwrap();
+    assert_eq!(result.total, 0);
+    assert_eq!(result.hubs.len(), 1);
+    assert_eq!(result.hubs[0].count, None);
+    assert!(result.hubs[0].error.is_some());
+}

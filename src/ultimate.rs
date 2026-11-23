@@ -134,15 +134,29 @@ pub fn inbox(messages: Option<&Value>, items: Option<&Value>) -> Vec<InboxEntry>
     entries
 }
 
+/// An agent for one hub: no redirects, and macOS's own TLS for remote hubs on tailnet `https://` URLs.
+fn agent(timeout: Duration, status_as_error: bool) -> ureq::Agent {
+    ureq::Agent::config_builder()
+        .timeout_global(Some(timeout))
+        .max_redirects(0)
+        .http_status_as_error(status_as_error)
+        .tls_config(
+            ureq::tls::TlsConfig::builder()
+                .provider(ureq::tls::TlsProvider::NativeTls)
+                .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+                .build(),
+        )
+        .build()
+        .new_agent()
+}
+
 /// A conversation document, or `None` when the instance does not have it (an extension it lacks).
 fn read_doc(url: &str, kind: &str) -> Result<Option<Value>> {
-    let agent = ureq::Agent::config_builder()
-        .timeout_global(Some(Duration::from_secs(1)))
-        .max_redirects(0)
-        .http_status_as_error(false)
-        .build()
-        .new_agent();
-    let body: Value = agent
+    read_doc_within(url, kind, Duration::from_secs(1))
+}
+
+pub fn read_doc_within(url: &str, kind: &str, timeout: Duration) -> Result<Option<Value>> {
+    let body: Value = agent(timeout, false)
         .post(format!("{url}/api/extensions/codemode/actions/read"))
         .header("Origin", url)
         .header("Content-Type", "application/json")
@@ -221,12 +235,7 @@ struct Response<T> {
 }
 
 fn read_action<T: DeserializeOwned>(url: &str, action: &str, args: Value) -> Result<T> {
-    let agent = ureq::Agent::config_builder()
-        .timeout_global(Some(Duration::from_secs(1)))
-        .max_redirects(0)
-        .build()
-        .new_agent();
-    let response: Response<T> = agent
+    let response: Response<T> = agent(Duration::from_secs(1), true)
         .post(format!("{url}/api/extensions/{action}"))
         .header("Origin", url)
         .header("Content-Type", "application/json")
