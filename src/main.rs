@@ -1,10 +1,11 @@
 use anyhow::{Context, Result, bail};
-use rtm::{model::Row, needs, pick, seen, snapshot, ultimate};
+use rtm::{automations, model::Row, needs, pick, seen, snapshot, ultimate};
 
 const USAGE: &str = "rtm pick [<client_id> [<block_id>]] [--bench-first-frame]
 rtm kill <session_id> [<client_id>]
 rtm snapshot [--json] [--wait] [--timing]
 rtm needs [--json]
+rtm automation <hub url> <id> <name> pause|resume|run [--json]
 rtm seen <rex session id>";
 use std::{
     io::{self, Write},
@@ -75,7 +76,14 @@ fn run() -> Result<()> {
                 for hub in &needs.hubs {
                     match (&hub.count, &hub.error) {
                         (Some(count), _) => {
-                            writeln!(out, "  {}  {}  {count}", hub.host, hub.project)?
+                            writeln!(out, "  {}  {}  {count}", hub.host, hub.project)?;
+                            for pinned in hub.automations.iter().filter(|a| a.pinned) {
+                                writeln!(
+                                    out,
+                                    "    {} {}  {}",
+                                    pinned.id, pinned.name, pinned.state
+                                )?;
+                            }
                         }
                         (None, error) => writeln!(
                             out,
@@ -86,6 +94,20 @@ fn run() -> Result<()> {
                         )?,
                     }
                 }
+            }
+        }
+        Some("automation") => {
+            let json = args.last().is_some_and(|arg| arg == "--json");
+            let [url, id, name, operation] = &args[1..args.len() - usize::from(json)] else {
+                bail!("usage: rtm automation <hub url> <id> <name> pause|resume|run [--json]");
+            };
+            let after = automations::act(url, id, name, operation)?;
+            let mut out = io::stdout().lock();
+            if json {
+                serde_json::to_writer(&mut out, &after)?;
+                writeln!(out)?;
+            } else {
+                writeln!(out, "{} {}  {}", after.id, after.name, after.state)?;
             }
         }
         Some("pick") => {

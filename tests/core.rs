@@ -532,3 +532,51 @@ fn needs_reads_other_hosts_remotes_and_an_unreachable_hub_has_no_count() {
     assert_eq!(result.hubs[0].count, None);
     assert!(result.hubs[0].error.is_some());
 }
+
+#[test]
+fn automations_use_the_panel_words_and_list_pinned_first_then_worst_first() {
+    use rtm::automations::parse;
+    let list = json!([
+        {"id": "A1", "name": "Dream", "enabled": true, "runs": [],
+         "condition": {"metric": "context", "armed": true}},
+        {"id": "A2", "name": "Paused pin", "enabled": false, "pinned": true, "runs": [],
+         "schedule": {"kind": "every", "ms": 60000}, "lastFireAt": 5},
+        {"id": "A3", "name": "Broken", "enabled": false, "runs": [],
+         "script": {"state": "failed", "error": "exit 1 three times"}},
+        {"id": "A4", "name": "Spent", "enabled": false, "runs": [],
+         "schedule": {"kind": "at", "time": "2020-01-01T00:00:00Z"}},
+        {"id": "A5", "name": "Pinned run failed", "enabled": true, "pinned": true,
+         "runs": [{"status": "failed", "answer": "boom"}], "event": {"name": "x"}},
+        {"name": "no id"}
+    ]);
+    let items = parse(&list, 1_800_000_000_000);
+    let shown: Vec<_> = items
+        .iter()
+        .map(|a| (a.id.as_str(), a.state, a.kind))
+        .collect();
+    assert_eq!(
+        shown,
+        [
+            ("A5", "failed", "event"),
+            ("A2", "paused", "schedule"),
+            ("A3", "failed", "script"),
+            ("A1", "armed", "context"),
+            ("A4", "done", "schedule"),
+        ]
+    );
+    assert_eq!(items[0].error.as_deref(), Some("boom"));
+    assert_eq!(items[2].error.as_deref(), Some("exit 1 three times"));
+    assert_eq!(items[1].last_fire_at, Some(5));
+}
+
+#[test]
+fn automation_changes_refuse_an_unknown_operation_and_an_unreachable_hub() {
+    use rtm::automations::act;
+    assert!(
+        act("http://127.0.0.1:9", "A1", "x", "stop")
+            .unwrap_err()
+            .to_string()
+            .contains("unknown operation")
+    );
+    assert!(act("http://127.0.0.1:9", "A1", "x", "pause").is_err());
+}

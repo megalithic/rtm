@@ -1,6 +1,7 @@
 //! What waits on the user across every Ultimate hub: this Mac's running instances and the other
 //! machines' hubs from `remotes` in `~/.ultimate/settings.json`. Each count is rtm's own Inbox
 //! (`ultimate::inbox`), so the menu bar, Rex and the picker never disagree.
+use crate::automations::{self, Automation};
 use crate::ultimate::{self, InboxEntry};
 use anyhow::Result;
 use serde::Serialize;
@@ -28,6 +29,11 @@ pub struct Hub {
     pub error: Option<String>,
     /// Open questions and Inbox items, oldest first; `<url>/?inbox=<key>` opens one.
     pub inbox: Vec<InboxEntry>,
+    /// Every automation, pinned first, then worst first; empty while unreadable.
+    pub automations: Vec<Automation>,
+    /// Why the automations could not be read, when the Inbox could.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub automations_error: Option<String>,
 }
 
 /// A remote hub: `(host, project, url)`.
@@ -65,24 +71,32 @@ pub fn read(url: &str, timeout: Duration) -> Result<Vec<InboxEntry>> {
     Ok(ultimate::inbox(messages?.as_ref(), items?.as_ref()))
 }
 
-fn hub(host: String, project: String, url: String, result: Result<Vec<InboxEntry>>) -> Hub {
-    match result {
-        Ok(inbox) => Hub {
-            host,
-            project,
-            url,
-            count: Some(inbox.len()),
-            error: None,
-            inbox,
-        },
-        Err(error) => Hub {
-            host,
-            project,
-            url,
-            count: None,
-            error: Some(format!("{error:#}")),
-            inbox: Vec::new(),
-        },
+fn hub(
+    host: String,
+    project: String,
+    url: String,
+    result: Result<Vec<InboxEntry>>,
+    automations: Result<Vec<Automation>>,
+) -> Hub {
+    let (count, error, inbox) = match result {
+        Ok(inbox) => (Some(inbox.len()), None, inbox),
+        Err(error) => (None, Some(format!("{error:#}")), Vec::new()),
+    };
+    let (automations, automations_error) = match automations {
+        Ok(automations) => (automations, None),
+        // An unreachable hub already says why once.
+        Err(_) if error.is_some() => (Vec::new(), None),
+        Err(failure) => (Vec::new(), Some(format!("{failure:#}"))),
+    };
+    Hub {
+        host,
+        project,
+        url,
+        count,
+        error,
+        inbox,
+        automations,
+        automations_error,
     }
 }
 
@@ -134,8 +148,15 @@ pub fn load(home: &Path) -> Result<Needs> {
             .into_iter()
             .map(|((host, project, url), timeout)| {
                 scope.spawn(move || {
-                    let result = read(&url, timeout);
-                    hub(host, project, url, result)
+                    let (result, automations) = thread::scope(|scope| {
+                        let automations = scope.spawn(|| automations::read(&url, timeout));
+                        let result = read(&url, timeout);
+                        (
+                            result,
+                            automations.join().expect("automations worker panicked"),
+                        )
+                    });
+                    hub(host, project, url, result, automations)
                 })
             })
             .collect();

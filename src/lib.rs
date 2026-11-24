@@ -1,4 +1,5 @@
 //! Read-only data sources and pure launcher model. No terminal UI or session actions.
+pub mod automations;
 pub mod cache;
 pub mod git;
 pub mod model;

@@ -166,6 +166,30 @@ pub fn read_doc_within(url: &str, kind: &str, timeout: Duration) -> Result<Optio
     doc_result(body)
 }
 
+/// An extension action's `{result}`, or `None` when the instance lacks that extension action.
+pub fn action_within(
+    url: &str,
+    action: &str,
+    args: Value,
+    timeout: Duration,
+) -> Result<Option<Value>> {
+    let body: Value = agent(timeout, false)
+        .post(format!("{url}/api/extensions/{action}"))
+        .header("Origin", url)
+        .header("Content-Type", "application/json")
+        .send_json(json!({"args": args}))?
+        .body_mut()
+        .read_json()?;
+    if let Some(result) = body.get("result") {
+        return Ok(Some(result.clone()));
+    }
+    match body.get("error").and_then(Value::as_str) {
+        Some("Unknown extension action") => Ok(None),
+        Some(error) => anyhow::bail!("{error}"),
+        None => anyhow::bail!("unexpected response"),
+    }
+}
+
 /// `{result}` is the document; an unknown document is `None`; any other error is an error.
 pub fn doc_result(body: Value) -> Result<Option<Value>> {
     if let Some(result) = body.get("result") {

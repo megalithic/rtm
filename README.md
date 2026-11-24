@@ -24,6 +24,7 @@ rtm snapshot --json --timing          # live Rex + Ultimate; cached registry and
 rtm snapshot --json --wait --timing   # also wait for cache refresh
 rtm seen 'session:<id>'               # fast, atomic last-viewed update; no discovery
 rtm needs [--json]                    # what waits on you, per hub: this Mac's instances and `remotes`
+rtm automation <url> <id> <name> pause|resume|run [--json]   # change one hub automation
 ```
 
 `rtm needs` counts each hub's Inbox exactly as the picker's Inbox row does (open questions to
@@ -32,9 +33,15 @@ the user plus open Inbox items), for this Mac's running instances and every othe
 `count: null` and its `error`, never 0; `total` sums the hubs that answered. The menu bar app
 and Rex trackers read it.
 
+Each hub also lists its `automations` (pinned first, then worst first), each with `pinned`,
+`enabled`, `kind` and `state` in the words of Ultimate's Automations panel (failed, watching,
+scheduled, armed, paused, done…). `rtm automation` pauses, resumes or runs one by id, and
+refuses when the hub's automation with that id is no longer called `<name>`: ids restart in
+every Ultimate chapter.
+
 Rex is read through the embedded `src/rex/snapshot.lua` with autostart disabled. Ultimate
 lockfiles are checked with signal 0; only the status, conversations and entries read actions
-are used. Snapshots never create, focus, kill or otherwise modify sessions; only `rtm pick` actions do.
+are used, plus `automations/list` and, from `rtm automation`, its pause, resume and run. Snapshots never create, focus, kill or otherwise modify sessions; only `rtm pick` actions do.
 
 Registry and PR refreshes use a background subprocess so they complete even after the snapshot
 command exits. Registry refreshes each time; PRs refresh after 60 seconds. The default cache is
