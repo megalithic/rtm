@@ -2,11 +2,11 @@
 //! Automations panel (`extensions/automations/parts.tsx` `lookOf`), and pause, resume or run by id.
 //! Ids restart in every chapter, so every change also names the automation and is refused when the
 //! hub's automation by that id has another name.
-use crate::ultimate;
+use crate::{needs, ultimate};
 use anyhow::{Result, bail};
 use serde::Serialize;
 use serde_json::{Value, json};
-use std::time::Duration;
+use std::{path::Path, time::Duration};
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Automation {
@@ -147,10 +147,50 @@ pub fn read(url: &str, timeout: Duration) -> Result<Vec<Automation>> {
     }
 }
 
-/// Pause, resume or run automation `id` on the hub, only while it is still called `name`.
-pub fn act(url: &str, id: &str, name: &str, operation: &str) -> Result<Automation> {
+/// `http://127.0.0.1:<port>` or `https://<machine>.<tailnet>.ts.net[:port]`, nothing else.
+pub fn private_hub(url: &str) -> bool {
+    let host_port = |rest: &str| {
+        rest.split_once('/')
+            .map_or(rest, |(head, _)| head)
+            .to_owned()
+    };
+    if let Some(rest) = url.strip_prefix("http://127.0.0.1:") {
+        let port = host_port(rest);
+        return !port.is_empty() && port.bytes().all(|b| b.is_ascii_digit());
+    }
+    let Some(rest) = url.strip_prefix("https://") else {
+        return false;
+    };
+    let authority = host_port(rest);
+    let host = authority
+        .split_once(':')
+        .map_or(authority.as_str(), |(host, port)| {
+            if port.bytes().all(|b| b.is_ascii_digit()) {
+                host
+            } else {
+                ""
+            }
+        });
+    host.ends_with(".ts.net")
+        && !host.contains('@')
+        && host
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')
+}
+
+/// Pause, resume or run automation `id` on a hub `rtm needs` reads, only while it is still called
+/// `name`. The hub checks the name again in the same transaction as the change; this first check
+/// also guards hubs whose Ultimate predates `expectName`.
+pub fn act(home: &Path, url: &str, id: &str, name: &str, operation: &str) -> Result<Automation> {
     if !OPERATIONS.contains(&operation) {
         bail!("unknown operation {operation}: pause, resume or run");
+    }
+    if !private_hub(url) {
+        bail!("{url} is neither loopback http nor a tailnet https hub");
+    }
+    let known = needs::targets(home, &needs::host_name())?;
+    if !known.iter().any(|((_, _, hub), _)| hub == url) {
+        bail!("{url} is not a running instance or a `remotes` hub");
     }
     let timeout = Duration::from_secs(5);
     let find = |list: &[Automation]| list.iter().find(|item| item.id == id).cloned();
@@ -163,7 +203,8 @@ pub fn act(url: &str, id: &str, name: &str, operation: &str) -> Result<Automatio
         Some(_) => {}
     }
     let path = format!("automations/actions/{operation}");
-    if ultimate::action_within(url, &path, json!({"id": id}), timeout)?.is_none() {
+    let args = json!({"id": id, "expectName": name});
+    if ultimate::action_within(url, &path, args, timeout)?.is_none() {
         bail!("{url} has no automations");
     }
     find(&read(url, timeout)?).ok_or_else(|| anyhow::anyhow!("{url} automation {id} disappeared"))

@@ -101,7 +101,7 @@ fn run() -> Result<()> {
             let [url, id, name, operation] = &args[1..args.len() - usize::from(json)] else {
                 bail!("usage: rtm automation <hub url> <id> <name> pause|resume|run [--json]");
             };
-            let after = automations::act(url, id, name, operation)?;
+            let after = automations::act(&ultimate::user_home()?, url, id, name, operation)?;
             let mut out = io::stdout().lock();
             if json {
                 serde_json::to_writer(&mut out, &after)?;

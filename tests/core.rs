@@ -570,13 +570,37 @@ fn automations_use_the_panel_words_and_list_pinned_first_then_worst_first() {
 }
 
 #[test]
-fn automation_changes_refuse_an_unknown_operation_and_an_unreachable_hub() {
-    use rtm::automations::act;
-    assert!(
-        act("http://127.0.0.1:9", "A1", "x", "stop")
-            .unwrap_err()
-            .to_string()
-            .contains("unknown operation")
-    );
-    assert!(act("http://127.0.0.1:9", "A1", "x", "pause").is_err());
+fn automation_changes_reach_only_private_hubs_rtm_knows_and_refuse_an_unknown_operation() {
+    use rtm::automations::{act, private_hub};
+    for ok in [
+        "http://127.0.0.1:4749",
+        "https://box.example-tailnet.ts.net:4749",
+        "https://box.tail.ts.net",
+    ] {
+        assert!(private_hub(ok), "{ok}");
+    }
+    for bad in [
+        "http://localhost:4749",
+        "http://127.0.0.1:4749@evil.com",
+        "http://127.0.0.1:",
+        "http://box.example-tailnet.ts.net:4749",
+        "https://evil.com",
+        "https://evil.com/.ts.net",
+        "https://ts.net.evil.com",
+        "https://user@box.tail.ts.net",
+    ] {
+        assert!(!private_hub(bad), "{bad}");
+    }
+    let home = std::env::temp_dir().join(format!("rtm-act-{}", std::process::id()));
+    std::fs::create_dir_all(home.join("projects")).unwrap();
+    std::fs::write(
+        home.join("settings.json"),
+        json!({"remotes": {"elsewhere": {"p": "https://box.tail.ts.net:9"}}}).to_string(),
+    )
+    .unwrap();
+    let error = |url: &str, op: &str| act(&home, url, "A1", "x", op).unwrap_err().to_string();
+    assert!(error("https://box.tail.ts.net:9", "stop").contains("unknown operation"));
+    assert!(error("https://evil.com", "pause").contains("neither loopback"));
+    assert!(error("https://other.tail.ts.net:9", "pause").contains("not a running instance"));
+    std::fs::remove_dir_all(&home).unwrap();
 }

@@ -37,7 +37,9 @@ Each hub also lists its `automations` (pinned first, then worst first), each wit
 `enabled`, `kind` and `state` in the words of Ultimate's Automations panel (failed, watching,
 scheduled, armed, paused, done…). `rtm automation` pauses, resumes or runs one by id, and
 refuses when the hub's automation with that id is no longer called `<name>`: ids restart in
-every Ultimate chapter.
+every Ultimate chapter, so the hub checks it again (`expectName`) in the change's own
+transaction. It only reaches a hub `rtm needs` reads, and only loopback `http://127.0.0.1:<port>`
+or tailnet `https://*.ts.net` URLs.
 
 Rex is read through the embedded `src/rex/snapshot.lua` with autostart disabled. Ultimate
 lockfiles are checked with signal 0; only the status, conversations and entries read actions

@@ -116,8 +116,8 @@ pub fn host_name() -> String {
     name.split('.').next().unwrap_or_default().to_owned()
 }
 
-pub fn load(home: &Path) -> Result<Needs> {
-    let host = host_name();
+/// Every hub to read, with its timeout: this Mac's running instances (1 s), then `remotes` (3 s).
+pub fn targets(home: &Path, host: &str) -> Result<Vec<(Remote, Duration)>> {
     let settings = fs::read(home.join("settings.json"))
         .ok()
         .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
@@ -131,18 +131,23 @@ pub fn load(home: &Path) -> Result<Needs> {
                     |name| name.to_string_lossy().into_owned(),
                 )
             });
-            (host.clone(), project, instance.url())
+            (host.to_owned(), project, instance.url())
         })
         .collect();
-    let targets: Vec<(Remote, Duration)> = locals
+    Ok(locals
         .into_iter()
         .map(|local| (local, Duration::from_secs(1)))
         .chain(
-            remotes(&settings, &host)
+            remotes(&settings, host)
                 .into_iter()
                 .map(|remote| (remote, Duration::from_secs(3))),
         )
-        .collect();
+        .collect())
+}
+
+pub fn load(home: &Path) -> Result<Needs> {
+    let host = host_name();
+    let targets = targets(home, &host)?;
     let hubs: Vec<Hub> = thread::scope(|scope| {
         let workers: Vec<_> = targets
             .into_iter()
