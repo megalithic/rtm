@@ -763,6 +763,36 @@ fn tiny_buffers_render_without_panicking() {
 }
 
 #[test]
+fn new_worktree_name_starts_as_the_search_in_kebab_case() {
+    assert_eq!(
+        state::kebab("  Fix Onboarding: email!! "),
+        "fix-onboarding-email"
+    );
+    assert_eq!(
+        state::kebab(&format!("{} b", "a".repeat(39))),
+        "a".repeat(39)
+    );
+    let mut app = App::new(model());
+    typed(&mut app, "Search");
+    select_named(&mut app, "atlas-search");
+    app.key(key("ctrl+t"));
+    assert!(matches!(&app.mode, Mode::Create { input, .. } if input == "search"));
+    assert!(matches!(app.key(key("enter")), Command::Create { name, .. } if name == "search"));
+    // An Ultimate instance row has no checkout of its own: a note, no input.
+    let mut app = App::new(model());
+    assert_eq!(selected_name(&app), "atlas");
+    app.key(key("ctrl+t"));
+    assert_eq!(app.mode, Mode::List);
+    assert!(app.note.is_some());
+    // A project header makes it from its main checkout.
+    select_named(&mut app, "[atlas]");
+    app.key(key("ctrl+t"));
+    assert!(
+        matches!(&app.mode, Mode::Create { repo, path, .. } if repo == "atlas" && !path.contains("/.worktrees/"))
+    );
+}
+
+#[test]
 fn ctrl_shift_t_on_an_ultimate_row_reads_the_branch_from_its_checkout() {
     fn fake_branch(path: &str) -> Option<String> {
         (path == "/Users/demo/code/atlas/.worktrees/db").then(|| "db-indexes".to_owned())

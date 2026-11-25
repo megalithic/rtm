@@ -375,6 +375,21 @@ fn ctrl_shift(key: &KeyEvent, letter: char) -> bool {
         && matches!(key.code, KeyCode::Char(c) if c.eq_ignore_ascii_case(&letter))
 }
 
+/// Search text as a worktree name: lowercase, anything but letters and digits as one `-`,
+/// at most 40 characters (rwt's limit for strive names).
+pub fn kebab(text: &str) -> String {
+    let mut out = String::new();
+    for c in text.chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c.to_ascii_lowercase());
+        } else if !out.is_empty() && !out.ends_with('-') {
+            out.push('-');
+        }
+    }
+    out.truncate(40);
+    out.trim_end_matches('-').to_owned()
+}
+
 fn repo_name(path: &str) -> String {
     let main = path.split("/.worktrees/").next().unwrap_or(path);
     main.rsplit('/').next().unwrap_or(main).to_owned()
@@ -684,26 +699,40 @@ impl App {
         }
     }
 
-    fn create(&mut self, off_branch: bool) -> Command {
-        let Some((row, parent)) = self.current() else {
-            return Command::None;
-        };
+    /// The checkout a new worktree comes from, and its branch: a project header's main
+    /// checkout, or the highlighted row's. An Ultimate instance and its Inbox have none.
+    fn create_source(&self) -> Option<(String, Option<String>)> {
+        if let ItemKind::Project { path, .. } = &self.selected_item()?.kind {
+            return Some((path.clone(), (self.branch_of)(path)));
+        }
+        let (row, parent) = self.current()?;
+        if matches!(row.kind, Kind::Ultimate | Kind::Inbox) {
+            return None;
+        }
         let pick = |row: &Row| {
             row.metadata
                 .worktree
                 .clone()
                 .or_else(|| row.metadata.project.clone())
         };
-        let Some(path) = pick(row).or_else(|| parent.and_then(pick)) else {
-            self.note = Some(Note::Info("no git checkout here".into()));
-            return Command::None;
-        };
+        let path = pick(row).or_else(|| parent.and_then(pick))?;
         let branch = row
             .metadata
             .branch
             .clone()
             .or_else(|| parent?.metadata.branch.clone())
             .or_else(|| (self.branch_of)(&path));
+        Some((path, branch))
+    }
+
+    fn create(&mut self, off_branch: bool) -> Command {
+        if self.selected_item().is_none() {
+            return Command::None;
+        }
+        let Some((path, branch)) = self.create_source() else {
+            self.note = Some(Note::Info("no git checkout here".into()));
+            return Command::None;
+        };
         if off_branch && branch.is_none() {
             self.note = Some(Note::Info("no branch to branch off".into()));
             return Command::None;
@@ -714,7 +743,7 @@ impl App {
             path,
             base,
             branch,
-            input: String::new(),
+            input: kebab(&self.query),
             busy: false,
             error: None,
         };
