@@ -84,6 +84,10 @@ pub fn viewer(row: &Row) -> Result<Vec<String>> {
             } else {
                 PathBuf::from(path)
             };
+            // Only absolute paths: a path from a hub then never reads as a viewer's option.
+            if !path.is_absolute() {
+                bail!("not an absolute path");
+            }
             if path.is_dir() {
                 bail!("no viewer for a directory");
             }

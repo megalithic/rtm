@@ -98,8 +98,9 @@ enum Message {
 enum Mode {
     #[default]
     Normal,
-    Answer(Vec<String>),
-    Dismiss,
+    /// The row the answer goes to, fixed when the modal opens.
+    Answer(Box<Row>, Vec<String>),
+    Dismiss(Box<Row>),
 }
 #[derive(Default)]
 struct App {
@@ -157,8 +158,8 @@ impl App {
                 )
             })
             .collect(),
-            Mode::Dismiss => vec![('y', "y Dismiss?".into()), ('n', "n Cancel".into())],
-            Mode::Answer(options) => options
+            Mode::Dismiss(_) => vec![('y', "y Dismiss?".into()), ('n', "n Cancel".into())],
+            Mode::Answer(_, options) => options
                 .iter()
                 .enumerate()
                 .map(|(i, s)| {
@@ -363,15 +364,16 @@ impl App {
         if !matches!(self.mode, Mode::Normal) {
             let mode = std::mem::take(&mut self.mode);
             match mode {
-                Mode::Dismiss if c == 'y' => self.act("dismiss", None, tx),
-                Mode::Answer(options) => {
+                Mode::Dismiss(row) if c == 'y' => self.act(*row, "dismiss", None, tx),
+                Mode::Answer(row, options) => {
                     if let Some(option) = c
                         .to_digit(10)
                         .and_then(|n| n.checked_sub(1))
                         .or_else(|| (c as u32).checked_sub(0xE000))
                         .and_then(|i| options.get(i as usize))
                     {
-                        self.act("answer", Some(option.clone()), tx);
+                        let option = option.clone();
+                        self.act(*row, "answer", Some(option), tx);
                     }
                 }
                 _ => {}
@@ -393,26 +395,25 @@ impl App {
             'r' => {
                 let _ = refresh.send(());
             }
-            'd' => self.act("done", None, tx),
+            'd' => {
+                if let Some(row) = self.rows.get(self.selected).cloned() {
+                    self.act(row, "done", None, tx);
+                }
+            }
             'a' => {
-                if let Some((_, options)) = self
-                    .rows
-                    .get(self.selected)
-                    .and_then(|r| r.entry.as_ref())
-                    .and_then(|e| e.answerable())
+                if let Some(row) = self.rows.get(self.selected)
+                    && let Some((_, options)) = row.entry.as_ref().and_then(|e| e.answerable())
                 {
-                    self.mode = Mode::Answer(options);
+                    self.mode = Mode::Answer(Box::new(row.clone()), options);
                 } else {
                     self.note = "answer this one in Ultimate (enter)".into();
                 }
             }
             'x' => {
-                if self
-                    .rows
-                    .get(self.selected)
-                    .is_some_and(|r| r.kind() == "question")
+                if let Some(row) = self.rows.get(self.selected)
+                    && row.kind() == "question"
                 {
-                    self.mode = Mode::Dismiss;
+                    self.mode = Mode::Dismiss(Box::new(row.clone()));
                 }
             }
             'e' | 'o' if !self.busy => {
@@ -459,20 +460,35 @@ impl App {
         }
         false
     }
-    fn act(&mut self, operation: &'static str, option: Option<String>, tx: &Sender<Message>) {
+    /// Moving the selection cancels an open answer or dismissal, which belongs to the old row.
+    fn select(&mut self, index: usize) {
+        self.selected = index.min(self.rows.len().saturating_sub(1));
+        self.mode = Mode::Normal;
+    }
+    /// Writes to `row`, the one the action was started on, never whatever is selected by then.
+    fn act(
+        &mut self,
+        row: Row,
+        operation: &'static str,
+        option: Option<String>,
+        tx: &Sender<Message>,
+    ) {
         if self.busy {
             return;
         }
-        let Some(row) = self.rows.get(self.selected).cloned() else {
-            return;
-        };
         if let Err(e) = actions::request(&row, operation, option.as_deref()) {
             self.note = e.to_string();
             return;
         }
         self.busy = true;
         let restore = if operation == "done" {
-            self.rows.remove(self.selected);
+            if let Some(index) = self
+                .rows
+                .iter()
+                .position(|r| r.url == row.url && r.key() == row.key())
+            {
+                self.rows.remove(index);
+            }
             Some(Box::new(row.clone()))
         } else {
             None
@@ -601,10 +617,9 @@ pub fn run(mut keys: Vec<KeyEvent>) -> Result<()> {
                         }
                     }
                 }
-                MouseEventKind::ScrollUp => app.selected = app.selected.saturating_sub(1),
-                MouseEventKind::ScrollDown => {
-                    app.selected = (app.selected + 1).min(app.rows.len().saturating_sub(1))
-                }
+                // Moving the selection cancels an open answer or dismissal, like a row tap.
+                MouseEventKind::ScrollUp => app.select(app.selected.saturating_sub(1)),
+                MouseEventKind::ScrollDown => app.select(app.selected + 1),
                 _ => {}
             },
             _ => {}
@@ -612,4 +627,52 @@ pub fn run(mut keys: Vec<KeyEvent>) -> Result<()> {
         app.draw(&mut screen)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn question(id: u64) -> Row {
+        let messages = serde_json::json!({"messages":[{"id":id,"to":"user","reply":true,"state":"delivered","text":"Choose","at":100,"questions":[{"text":"Which?","kind":"choice","options":[{"label":"One"},{"label":"Two"}]}]}]});
+        let entries = data::entries(Some(&messages), None);
+        data::project(
+            "local",
+            "test",
+            "http://127.0.0.1:9999",
+            entries,
+            vec![],
+            None,
+            100,
+        )
+        .remove(0)
+    }
+
+    fn press(app: &mut App, c: char) {
+        let (tx, _rx) = channel();
+        let (refresh, _r) = channel();
+        app.key(
+            KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE),
+            &tx,
+            &refresh,
+        );
+    }
+
+    // Scrolling while a dismissal or answer waited once sent it to the newly selected question.
+    #[test]
+    fn a_pending_answer_or_dismissal_keeps_its_row_and_scrolling_cancels_it() {
+        let mut app = App {
+            rows: vec![question(7), question(8)],
+            ..App::default()
+        };
+        press(&mut app, 'x');
+        assert!(matches!(&app.mode, Mode::Dismiss(row) if row.key() == "message:7"));
+        app.select(1);
+        assert!(matches!(app.mode, Mode::Normal));
+        app.select(0);
+        press(&mut app, 'a');
+        assert!(matches!(&app.mode, Mode::Answer(row, _) if row.key() == "message:7"));
+        app.select(1);
+        assert!(matches!(app.mode, Mode::Normal));
+    }
 }
