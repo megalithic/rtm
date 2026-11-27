@@ -4,6 +4,7 @@ use rtm::{automations, model::Row, needs, pick, seen, snapshot, ultimate};
 const USAGE: &str = "rtm pick [<client_id> [<block_id>]] [--bench-first-frame]
 rtm kill <session_id> [<client_id>]
 rtm snapshot [--json] [--wait] [--timing]
+rtm inbox [--keys \"…\"]
 rtm needs [--json]
 rtm automation <hub url> <id> <name> pause|resume|run [--json]
 rtm seen <rex session id>";
@@ -61,6 +62,19 @@ fn run() -> Result<()> {
                     eprintln!("{source}: {ms:.2} ms");
                 }
             }
+        }
+        Some("inbox") => {
+            let keys = match &args[1..] {
+                [] => Vec::new(),
+                [flag, keys] if flag == "--keys" => keys
+                    .split_whitespace()
+                    .map(|name| {
+                        pick::parse_key(name).with_context(|| format!("unknown key {name}"))
+                    })
+                    .collect::<Result<Vec<_>>>()?,
+                _ => bail!("usage: rtm inbox [--keys …]"),
+            };
+            rtm::inbox::run(keys)?;
         }
         Some("needs") => {
             if args[1..].iter().any(|arg| arg != "--json") {

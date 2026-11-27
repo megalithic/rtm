@@ -1737,6 +1737,7 @@ version = "0.1.0"
 dependencies = [
  "ansi-to-tui",
  "anyhow",
+ "base64 0.22.1",
  "chrono",
  "crossterm",
  "dirs",
@@ -1746,6 +1747,7 @@ dependencies = [
  "ratatui",
  "serde",
  "serde_json",
+ "sha2",
  "syntect",
  "tachyonfx",
  "tui-markdown",

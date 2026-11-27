@@ -2,6 +2,7 @@
 pub mod automations;
 pub mod cache;
 pub mod git;
+pub mod inbox;
 pub mod model;
 pub mod needs;
 pub mod pick;

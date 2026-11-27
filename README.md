@@ -17,6 +17,32 @@ the Ultimate instance's tabs to the conversation and raise its Helium tab over C
 (`PIDEWAVE_CDP_PORT`, default 9223). `--bench-first-frame` prints the first-frame time;
 `--keys "ctrl+n ctrl+k"` presses keys before the first frame.
 
+## Inbox
+
+`rtm inbox` is a full-tab, terminal-palette inbox across this Mac's Ultimate instances and
+all configured remote hubs. Waiting on you contains open entries under 24 hours old;
+Quiet contains older entries; Working lists busy conversations. Machines (this Mac first)
+and projects group each section. Unreachable hubs show errors, never an empty success.
+It loads in the background every 10 seconds. Rows and footer buttons accept taps, including
+answer options and dismissal confirmation. `--keys "j enter"` injects keys for demos.
+
+| Key | Does |
+| --- | --- |
+| ↑/↓, j/k, ctrl+n/p | select a row |
+| enter | go to the question, item or conversation in Ultimate |
+| d | mark an Inbox item done (not a question) |
+| a | answer a single open choice/confirm question; 1–9 or tap an option |
+| x | dismiss a question after y/n confirmation |
+| o | open a viewer in a right split beside `$REX_BLOCK`, replacing the prior viewer |
+| r | refresh |
+| q / esc | quit (esc cancels an open answer/confirmation first) |
+
+Splits use terminal-browser for links and hub pages, kitten for images, glow for Markdown,
+delta for patches, and bat for other text. Directories have no viewer. Paths are passed as
+arguments, not interpolated into shell code. Done/answer/dismiss only write to known private
+hubs. With `OSC7577_TOKEN`, startup reports `rtm inbox` to Rex's Program Resume Protocol;
+spawned programs do not inherit the token.
+
 ## Data layer
 
 ```sh
